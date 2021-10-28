@@ -8,6 +8,8 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
+#include <inttypes.h>
+#include <limits.h>
 #include <linux/input.h>
 #include <poll.h>
 #include <stdbool.h>
@@ -15,7 +17,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <limits.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <time.h>
@@ -240,7 +241,7 @@ static int compute_timeout(struct action *actions, int action_count) {
 
 	for (i = 0; i <= action_count; i++) {
 		if (has_wakeup(&actions[i])) {
-			int diff = time_diff_ts(&actions[i].ts_wakeup, &ts);
+			int64_t diff = time_diff_ts(&actions[i].ts_wakeup, &ts);
 			if (diff < 0)
 				timeout = 0;
 			else if (timeout == -1 || diff < timeout)
@@ -268,7 +269,7 @@ static void handle_timeouts(struct action *actions, int action_count) {
 				time_ts2tv(&actions[i].tv_released, &ts, 0);
 			}
 
-			int diff = time_diff_tv(&actions[i].tv_released, &actions[i].tv_pressed);
+			int64_t diff = time_diff_tv(&actions[i].tv_released, &actions[i].tv_pressed);
 			if ((actions[i].type == LONG_PRESS
 				    && diff >= actions[i].trigger_time)
 			    || (actions[i].type == SHORT_PRESS
@@ -277,7 +278,7 @@ static void handle_timeouts(struct action *actions, int action_count) {
 					printf("running %s\n", actions[i].action);
 				system(actions[i].action);
 			} else if (debug) {
-				printf("ignoring key %d released after %d ms\n",
+				printf("ignoring key %d released after %"PRId64" ms\n",
 				       actions[i].code, diff);
 			}
 
