@@ -1,8 +1,8 @@
-PREFIX = /usr
+PREFIX ?= /usr
 
 .PHONY: all install clean
 
-CFLAGS := -Wall -Wextra
+CFLAGS ?= -Wall -Wextra
 
 all: buttond
 
