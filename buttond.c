@@ -1,3 +1,9 @@
+// SPDX-License-Identifier: MIT
+/*
+ * Handle evdev button press
+ * Copyright (c) 2021 Atmark Techno,Inc.
+ */
+
 #define _POSIX_C_SOURCE 199309L
 #include <errno.h>
 #include <fcntl.h>
