@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <time.h>
@@ -16,8 +17,8 @@
 
 static int debug = 0;
 #define MAX_ACTIONS 64
-#define LONG_PRESS_MSECS 5000
-#define SHORT_PRESS_MSECS 1000
+#define DEFAULT_LONG_PRESS_MSECS 5000
+#define DEFAULT_SHORT_PRESS_MSECS 1000
 #define DEBOUNCE_MSECS 10
 
 ssize_t read_safe(int fd, void *buf, size_t count, size_t partial_read) {
@@ -73,6 +74,7 @@ static struct option long_options[] = {
 	{"short",	required_argument,	0, 's' },
 	{"long",	required_argument,	0, 'l' },
 	{"action",	required_argument,	0, 'a' },
+	{"time",	required_argument,	0, 't' },
 	{"verbose",	no_argument,		0, 'v' },
 	{"version",	no_argument,		0, 'V' },
 	{"help",	no_argument,		0, 'h' },
@@ -87,8 +89,8 @@ static void help(char *argv0) {
 	printf("Usage: %s [options]\n", argv0);
 	printf("Options:\n");
 	printf("  -i, --input <file>: file to get event from e.g. /dev/input/event2\n");
-	printf("  -s, --short <key> --action <command>: action on short key press\n");
-	printf("  -l, --long <key> --action <command>: action on long key press\n");
+	printf("  -s/--short <key>  [-t/--time <time ms>] -a/--action <command>: action on short key press\n");
+	printf("  -l/--long <key> [-t/--time <time ms>] -a/--action <command>: action on long key press\n");
 	printf("  -h, --help: show this help\n");
 	printf("  -V, --version: show version\n");
 	printf("  -v, --verbose: verbose (repeatable)\n\n");
@@ -97,12 +99,15 @@ static void help(char *argv0) {
 	printf("with -vv\n\n");
 
 	printf("Semantics: a short press action happens on release, if and only if\n");
-	printf("the button was released before %d milliseconds.\n", SHORT_PRESS_MSECS);
+	printf("the button was released before <time> (default %d) milliseconds.\n",
+	       DEFAULT_SHORT_PRESS_MSECS);
 	printf("a long press action happens even if key is still pressed, if it has been\n");
-	printf("held for at least %d milliseconds.\n\n", LONG_PRESS_MSECS);
+	printf("held for at least <time> (default %d) milliseconds.\n\n",
+	       DEFAULT_LONG_PRESS_MSECS);
 
 	printf("Note some keyboards have repeat built in firmware so quick repetitions\n");
-	printf("(<%dms) are handled as if key were pressed continuously\n", DEBOUNCE_MSECS);
+	printf("(<%dms) are handled as if key were pressed continuously\n",
+	       DEBOUNCE_MSECS);
 }
 
 struct action {
@@ -113,8 +118,8 @@ struct action {
 		LONG_PRESS,
 		SHORT_PRESS,
 	} type;
-	/* command to run */
-	char const *action;
+	/* cutoff time for action */
+	int trigger_time;
 	/* state machine:
 	 * - RELEASED/PRESSED state
 	 * - DEBOUNCE: immediately after being released for DEBOUNCE_MSECS
@@ -126,6 +131,8 @@ struct action {
 		KEY_DEBOUNCE,
 		KEY_HANDLED,
 	} state;
+	/* command to run */
+	char const *action;
 	/* when key was pressed - valid for state == KEY_PRESSED or KEY_DEBOUNCE */
 	struct timeval tv_pressed;
 	/* valid when KEY_DEBOUNCE */
@@ -141,14 +148,29 @@ static uint16_t strtou16(const char *str) {
 
 	val = strtol(str, &endptr, 0);
 	if (*endptr != 0) {
-		fprintf(stderr, "Key code must passed as integer");
-		errno = EINVAL;
-		return 0xffff;
+		fprintf(stderr, "Argument must be a full integer");
+		exit(EXIT_FAILURE);
 	}
 	if (val < 0 || val > 0xffff) {
-		fprintf(stderr, "Key code must be a 16 bit integer");
-		errno = ERANGE;
-		return 0xffff;
+		fprintf(stderr, "Argument must be a 16 bit integer");
+		exit(EXIT_FAILURE);
+	}
+	errno = 0;
+	return val;
+}
+
+static uint32_t strtoint(const char *str) {
+	char *endptr;
+	long val;
+
+	val = strtol(str, &endptr, 0);
+	if (*endptr != 0) {
+		fprintf(stderr, "Argument must be a full integer");
+		exit(EXIT_FAILURE);
+	}
+	if (val < INT_MIN || val > INT_MAX) {
+		fprintf(stderr, "Argument must be a C int");
+		exit(EXIT_FAILURE);
 	}
 	errno = 0;
 	return val;
@@ -174,7 +196,7 @@ static void handle_key(struct input_event *event, struct action *action) {
 
 		if (action->type == LONG_PRESS) {
 			time_tv2ts(&action->ts_wakeup, &action->tv_pressed,
-				 LONG_PRESS_MSECS);
+				 action->trigger_time);
 		}
 		break;
 	case KEY_PRESSED:
@@ -241,8 +263,10 @@ static void handle_timeouts(struct action *actions, int action_count) {
 			}
 
 			int diff = time_diff_tv(&actions[i].tv_released, &actions[i].tv_pressed);
-			if ((actions[i].type == LONG_PRESS && diff >= LONG_PRESS_MSECS)
-			    || (actions[i].type == SHORT_PRESS && diff < SHORT_PRESS_MSECS)) {
+			if ((actions[i].type == LONG_PRESS
+				    && diff >= actions[i].trigger_time)
+			    || (actions[i].type == SHORT_PRESS
+				    && diff < actions[i].trigger_time)) {
 				if (debug)
 					printf("running %s\n", actions[i].action);
 				system(actions[i].action);
@@ -265,7 +289,7 @@ int main(int argc, char *argv[]) {
 	int action_count = -1;
 
 	int c;
-	while ((c = getopt_long(argc, argv, "i:s:l:a:vVh", long_options, NULL)) >= 0) {
+	while ((c = getopt_long(argc, argv, "i:s:l:a:t:vVh", long_options, NULL)) >= 0) {
 		switch (c) {
 		case 'i':
 			event_input = optarg;
@@ -281,12 +305,14 @@ int main(int argc, char *argv[]) {
 				exit(EXIT_FAILURE);
 			}
 			action_count++;
-			actions[action_count].type = (c == 's' ? SHORT_PRESS : LONG_PRESS);
+			actions[action_count].type =
+				(c == 's' ? SHORT_PRESS : LONG_PRESS);
+			actions[action_count].trigger_time =
+				(c == 's' ? DEFAULT_SHORT_PRESS_MSECS :
+					    DEFAULT_LONG_PRESS_MSECS);
 			actions[action_count].code = strtou16(optarg);
 			actions[action_count].action = NULL;
 			actions[action_count].state = KEY_RELEASED;
-			if (actions[action_count].code == 0xffff && errno != 0)
-				exit(EXIT_FAILURE);
 			break;
 		case 'a':
 			if (action_count < 0) {
@@ -298,6 +324,13 @@ int main(int argc, char *argv[]) {
 				exit(EXIT_FAILURE);
 			}
 			actions[action_count].action = optarg;
+			break;
+		case 't':
+			if (action_count < 0) {
+				fprintf(stderr, "Action can only be provided after setting key code\n");
+				exit(EXIT_FAILURE);
+			}
+			actions[action_count].trigger_time = strtoint(optarg);
 			break;
 		case 'v':
 			debug++;
