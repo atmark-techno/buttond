@@ -18,6 +18,13 @@ error() {
 run_pattern() {
 	local testname="$1"
 	shift
+
+	# skip tests we didn't ask for
+	case ",$ONLY," in
+	",,"|*",$testname,"*) ;;
+	*) return;;
+	esac
+
 	declare -a keys=( )
 	while [[ $# -gt 0 ]]; do
 		if [[ "$1" = "--" ]]; then
@@ -28,6 +35,13 @@ run_pattern() {
 		shift
 	done
 
+	if [[ -n "$DRYRUN" ]]; then
+		printf '"%s" ' "$GEN_EVENTS" "${keys[@]}"
+		printf "| "
+		printf '"%s" ' "$BUTTOND" --test_mode -i /dev/stdin "$@"
+		echo
+		return
+	fi
 	"$GEN_EVENTS" "${keys[@]}" | "$BUTTOND" --test_mode -i /dev/stdin "$@" &
 	PROCESSES[$testname]=$!
 }
@@ -35,6 +49,14 @@ run_pattern() {
 add_check() {
 	local testname="$1" file
 	shift
+
+	# skip tests we didn't ask for
+	case ",$ONLY," in
+	",,"|*",$testname,"*) ;;
+	*) return;;
+	esac
+	[[ -n "$DRYRUN" ]] && return
+
 	for file; do
 		[[ -z "${CHECKS[$file]}" ]] && [[ -z "${CHECKS[-$file]}" ]] \
 			|| error "file $file used in $testname was previously used in ${CHECKS[$file]}"
