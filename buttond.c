@@ -24,7 +24,8 @@
 
 static int debug = 0;
 #define MAX_INPUTS 32
-#define MAX_ACTIONS 64
+#define MAX_KEYS 32
+#define MAX_ACTIONS 10
 #define DEFAULT_LONG_PRESS_MSECS 5000
 #define DEFAULT_SHORT_PRESS_MSECS 1000
 #define DEBOUNCE_MSECS 10
@@ -120,8 +121,6 @@ static void help(char *argv0) {
 }
 
 struct action {
-	/* key code from linux uapi/linux/input-event-code.h */
-	uint16_t code;
 	/* type of action (long/short press) */
 	enum type {
 		LONG_PRESS,
@@ -129,6 +128,17 @@ struct action {
 	} type;
 	/* cutoff time for action */
 	int trigger_time;
+	/* command to run */
+	char const *action;
+};
+
+struct key {
+	uint16_t code;
+
+	/* key actions */
+	int action_count;
+	struct action actions[MAX_ACTIONS];
+
 	/* state machine:
 	 * - RELEASED/PRESSED state
 	 * - DEBOUNCE: immediately after being released for DEBOUNCE_MSECS
@@ -140,16 +150,16 @@ struct action {
 		KEY_DEBOUNCE,
 		KEY_HANDLED,
 	} state;
-	/* command to run */
-	char const *action;
+
 	/* when key was pressed - valid for state == KEY_PRESSED or KEY_DEBOUNCE */
 	struct timeval tv_pressed;
 	/* valid when KEY_DEBOUNCE */
 	struct timeval tv_released;
-	/* when next to wakeup - valid for
-	 * state == KEY_DEBOUNCE || (state == KEY_PRESSED && type == LONG_PRESS) */
+	/* when next to wakeup - valid  when has_wakeup is true */
 	struct timespec ts_wakeup;
+	bool has_wakeup;
 };
+
 
 static uint16_t strtou16(const char *str) {
 	char *endptr;
@@ -211,22 +221,24 @@ static void print_key(struct input_event *event, const char *filename,
 	}
 }
 
-static void handle_key(struct input_event *event, struct action *action) {
-	switch (action->state) {
+static void handle_key(struct input_event *event, struct key *key) {
+	switch (key->state) {
 	case KEY_RELEASED:
 	case KEY_DEBOUNCE:
 		/* new key press -- can be a release if program started with key or handled long press */
 		if (event->value == 0)
 			break;
 		/* don't reset timestamp on debounce */
-		if (action->state == KEY_RELEASED) {
-			action->tv_pressed = event->time;
+		if (key->state == KEY_RELEASED) {
+			key->tv_pressed = event->time;
 		}
-		action->state = KEY_PRESSED;
+		key->state = KEY_PRESSED;
 
+		struct action *action = &key->actions[key->action_count-1];
 		if (action->type == LONG_PRESS) {
-			time_tv2ts(&action->ts_wakeup, &action->tv_pressed,
-				 action->trigger_time);
+			key->has_wakeup = true;
+			time_tv2ts(&key->ts_wakeup, &key->tv_pressed,
+				   action->trigger_time);
 		}
 		break;
 	case KEY_PRESSED:
@@ -234,25 +246,21 @@ static void handle_key(struct input_event *event, struct action *action) {
 		if (event->value != 0)
 			break;
 		/* mark key for debounce, we will handle event after timeout */
-		action->state = KEY_DEBOUNCE;
-		action->tv_released = event->time;
-		time_tv2ts(&action->ts_wakeup, &action->tv_pressed,
-			 DEBOUNCE_MSECS);
+		key->state = KEY_DEBOUNCE;
+		key->tv_released = event->time;
+		key->has_wakeup = true;
+		time_tv2ts(&key->ts_wakeup, &key->tv_pressed,
+			   DEBOUNCE_MSECS);
 		break;
 	case KEY_HANDLED:
 		/* ignore until key down */
 		if (event->value != 0)
 			break;
-		action->state = KEY_RELEASED;
+		key->state = KEY_RELEASED;
 	}
 }
 
-static bool has_wakeup(struct action *action) {
-	return action->state == KEY_DEBOUNCE
-		|| (action->state == KEY_PRESSED && action->type == LONG_PRESS);
-}
-
-static int compute_timeout(struct action *actions, int action_count) {
+static int compute_timeout(struct key *keys, int key_count) {
 	int i;
 	int timeout = -1;
 	struct timespec ts;
@@ -262,9 +270,9 @@ static int compute_timeout(struct action *actions, int action_count) {
 		exit(EXIT_FAILURE);
 	}
 
-	for (i = 0; i <= action_count; i++) {
-		if (has_wakeup(&actions[i])) {
-			int64_t diff = time_diff_ts(&actions[i].ts_wakeup, &ts);
+	for (i = 0; i <= key_count; i++) {
+		if (keys[i].has_wakeup) {
+			int64_t diff = time_diff_ts(&keys[i].ts_wakeup, &ts);
 			if (diff < 0)
 				timeout = 0;
 			else if (timeout == -1 || diff < timeout)
@@ -274,7 +282,28 @@ static int compute_timeout(struct action *actions, int action_count) {
 	return timeout;
 }
 
-static void handle_timeouts(struct action *actions, int action_count) {
+static bool action_match(struct action *action, int time) {
+	switch (action->type) {
+	case LONG_PRESS:
+		return time >= action->trigger_time;
+	case SHORT_PRESS:
+		return time < action->trigger_time;
+	default:
+		fprintf(stderr, "invalid action!!\n");
+		exit(EXIT_FAILURE);
+	}
+}
+
+static struct action *find_key_action(struct key *key, int time) {
+	/* check from the end to get the best match */
+	for (int i = key->action_count - 1; i >= 0; i--) {
+		if (action_match(&key->actions[i], time))
+			return &key->actions[i];
+	}
+	return NULL;
+}
+
+static void handle_timeouts(struct key *keys, int key_count) {
 	int i;
 	struct timespec ts;
 
@@ -283,45 +312,42 @@ static void handle_timeouts(struct action *actions, int action_count) {
 		exit(EXIT_FAILURE);
 	}
 
-	for (i = 0; i <= action_count; i++) {
-		if (has_wakeup(&actions[i])
-		    && (time_diff_ts(&actions[i].ts_wakeup, &ts) <= 0)) {
+	for (i = 0; i <= key_count; i++) {
+		if (keys[i].has_wakeup
+		    && (time_diff_ts(&keys[i].ts_wakeup, &ts) <= 0)) {
 
-			if (actions[i].state != KEY_DEBOUNCE) {
+			if (keys[i].state != KEY_DEBOUNCE) {
 				/* key still pressed - set artifical release time */
-				time_ts2tv(&actions[i].tv_released, &ts, 0);
+				time_ts2tv(&keys[i].tv_released, &ts, 0);
 			}
 
-			int64_t diff = time_diff_tv(&actions[i].tv_released, &actions[i].tv_pressed);
-			if ((actions[i].type == LONG_PRESS
-				    && diff >= actions[i].trigger_time)
-			    || (actions[i].type == SHORT_PRESS
-				    && diff < actions[i].trigger_time)) {
+			int64_t diff = time_diff_tv(&keys[i].tv_released, &keys[i].tv_pressed);
+			struct action *action = find_key_action(&keys[i], diff);
+			if (action) {
 				if (debug)
-					printf("running %s\n", actions[i].action);
-				system(actions[i].action);
+					printf("running %s\n", action->action);
+				system(action->action);
 			} else if (debug) {
 				printf("ignoring key %d released after %"PRId64" ms\n",
-				       actions[i].code, diff);
+				       keys[i].code, diff);
 			}
 
-			if (actions[i].state == KEY_DEBOUNCE)
-				actions[i].state = KEY_RELEASED;
+			keys[i].has_wakeup = false;
+			if (keys[i].state == KEY_DEBOUNCE)
+				keys[i].state = KEY_RELEASED;
 			else
-				actions[i].state = KEY_HANDLED;
+				keys[i].state = KEY_HANDLED;
 		}
 	}
 }
 
-static void handle_input(int fd, struct action *actions, int action_count,
+static void handle_input(int fd, struct key *keys, int key_count,
 			 const char *filename) {
 	struct input_event event;
 	int partial_read = 0;
 
 	while ((partial_read = read_safe(fd, &event, sizeof(event), partial_read))
 			== sizeof(event)) {
-		int key;
-
 		/* ignore non-keyboard events */
 		if (event.type != 1) {
 			if (debug > 2)
@@ -329,20 +355,22 @@ static void handle_input(int fd, struct action *actions, int action_count,
 			continue;
 		}
 
-		for (key = 0; key <= action_count; key++) {
-			if (actions[key].code == event.code) {
+		struct key *key = NULL;
+		for (int i = 0; i <= key_count; i++) {
+			if (keys[i].code == event.code) {
+				key = &keys[i];
 				break;
 			}
 		}
 		/* ignore unconfigured key */
-		if (key > action_count) {
+		if (!key) {
 			if (debug > 1)
 				print_key(&event, filename, "ignored");
 			continue;
 		}
 		print_key(&event, filename, "processing");
 
-		handle_key(&event, &actions[key]);
+		handle_key(&event, key);
 	}
 	if (partial_read < 0) {
 		fprintf(stderr, "read error: %d\n", -partial_read);
@@ -355,13 +383,55 @@ static void handle_input(int fd, struct action *actions, int action_count,
 	}
 }
 
+static struct action *add_short_action(struct key *key) {
+	/* can only have one short key */
+	for (int i = 0; i < key->action_count; i++) {
+		if (key->actions[i].type == SHORT_PRESS) {
+			fprintf(stderr, "duplicate short key for key %d, aborting.\n",
+				key->code);
+			exit(EXIT_FAILURE);
+		}
+	}
+	struct action *action = &key->actions[key->action_count];
+	key->action_count++;
+	action->type = SHORT_PRESS;
+	action->trigger_time = DEFAULT_SHORT_PRESS_MSECS;
+	return action;
+}
 
+static struct action *add_long_action(struct key *key) {
+	/* insert at the end, we'll move it when setting time */
+	struct action *action = &key->actions[key->action_count];
+	key->action_count++;
+	action->type = LONG_PRESS;
+	action->trigger_time = DEFAULT_LONG_PRESS_MSECS;
+	return action;
+}
+
+static int sort_actions_compare(const void *v1, const void *v2) {
+	const struct action *a1 = (const struct action*)v1;
+	const struct action *a2 = (const struct action*)v2;
+	if (a1->type == SHORT_PRESS)
+		return -1;
+	if (a2->type == SHORT_PRESS)
+		return 1;
+	if (a1->trigger_time < a2->trigger_time)
+		return -1;
+	if (a1->trigger_time > a2->trigger_time)
+		return 1;
+	return 0;
+}
+static void sort_actions(struct key *key) {
+	qsort(key->actions, key->action_count,
+		sizeof(key->actions[0]), sort_actions_compare);
+}
 
 int main(int argc, char *argv[]) {
 	char const *event_input[MAX_INPUTS] = { };
-	struct action actions[MAX_ACTIONS];
+	struct key keys[MAX_KEYS] = { };
+	struct action *cur_action = NULL;
 	int input_count = 0;
-	int action_count = -1;
+	int key_count = 0;
 
 	int c;
 	while ((c = getopt_long(argc, argv, "i:s:l:a:t:vVh", long_options, NULL)) >= 0) {
@@ -376,48 +446,52 @@ int main(int argc, char *argv[]) {
 			break;
 		case 's':
 		case 'l':
-			if (action_count >= 0 && actions[action_count].action == NULL) {
+			if (cur_action && cur_action->action == NULL) {
 				fprintf(stderr, "Must set action before specifying next key!\n");
 				exit(EXIT_FAILURE);
 			}
-			if (action_count >= MAX_ACTIONS - 1) {
-				fprintf(stderr, "Only support up to %d bindings\n", MAX_ACTIONS);
-				exit(EXIT_FAILURE);
+			uint16_t code = strtou16(optarg);
+			struct key *cur_key = NULL;
+			for (int i = 0; i < key_count; i++) {
+				if (keys[i].code == code) {
+					cur_key = &keys[i];
+					break;
+				}
 			}
-			action_count++;
-			actions[action_count].type =
-				(c == 's' ? SHORT_PRESS : LONG_PRESS);
-			actions[action_count].trigger_time =
-				(c == 's' ? DEFAULT_SHORT_PRESS_MSECS :
-					    DEFAULT_LONG_PRESS_MSECS);
-			actions[action_count].code = strtou16(optarg);
-			actions[action_count].action = NULL;
-			actions[action_count].state = KEY_RELEASED;
-			for (int i = 0; i < action_count; i++) {
-				if (actions[i].code == actions[action_count].code
-				    && actions[i].type == actions[action_count].type) {
-					fprintf(stderr, "It is not possible to specify a key multiple time\n");
+			if (!cur_key) {
+				if (key_count >= MAX_KEYS) {
+					fprintf(stderr, "Only support up to %d bindings\n", MAX_KEYS);
 					exit(EXIT_FAILURE);
 				}
+				cur_key = &keys[key_count];
+				key_count++;
+				cur_key->code = strtou16(optarg);
+				cur_key->state = KEY_RELEASED;
+			}
+			if (cur_key->action_count >= MAX_ACTIONS) {
+				fprintf(stderr, "Only support up to %d actions per key\n",
+					MAX_ACTIONS);
+				exit(EXIT_FAILURE);
+			}
+			if (c == 's') {
+				cur_action = add_short_action(cur_key);
+			} else {
+				cur_action = add_long_action(cur_key);
 			}
 			break;
 		case 'a':
-			if (action_count < 0) {
+			if (!cur_action) {
 				fprintf(stderr, "Action can only be provided after setting key code\n");
 				exit(EXIT_FAILURE);
 			}
-			if (actions[action_count].action != NULL) {
-				fprintf(stderr, "Action was already set for this key\n");
-				exit(EXIT_FAILURE);
-			}
-			actions[action_count].action = optarg;
+			cur_action->action = optarg;
 			break;
 		case 't':
-			if (action_count < 0) {
+			if (!cur_action) {
 				fprintf(stderr, "Action can only be provided after setting key code\n");
 				exit(EXIT_FAILURE);
 			}
-			actions[action_count].trigger_time = strtoint(optarg);
+			cur_action->trigger_time = strtoint(optarg);
 			break;
 		case 'v':
 			debug++;
@@ -442,14 +516,17 @@ int main(int argc, char *argv[]) {
 		fprintf(stderr, "No input have been given, exiting\n");
 		exit(EXIT_FAILURE);
 	}
-	if (action_count < 0 && debug <= 1) {
+	if (key_count <= 0 && debug <= 1) {
 		/* allow no action with full debug to configure new keys the first time */
 		fprintf(stderr, "No action defined, exiting\n");
 		exit(EXIT_FAILURE);
 	}
-	if (action_count >= 0 && actions[action_count].action == NULL) {
+	if (cur_action && cur_action->action == NULL) {
 		fprintf(stderr, "Last key press was defined without action\n");
 		exit(EXIT_FAILURE);
+	}
+	for (int i = 0; i < key_count; i++) {
+		sort_actions(&keys[i]);
 	}
 
 	struct pollfd pollfd[MAX_INPUTS] = { };
@@ -470,14 +547,14 @@ int main(int argc, char *argv[]) {
 	}
 
 	while (1) {
-		int timeout = compute_timeout(actions, action_count);
+		int timeout = compute_timeout(keys, key_count);
 		int n = poll(pollfd, input_count, timeout);
 		if (n < 0) {
 			fprintf(stderr, "Poll failure: %m\n");
 			exit(EXIT_FAILURE);
 		}
 
-		handle_timeouts(actions, action_count);
+		handle_timeouts(keys, key_count);
 		if (n == 0)
 			continue;
 		for (int i = 0; i < input_count; i++) {
@@ -488,7 +565,7 @@ int main(int argc, char *argv[]) {
 					event_input[i]);
 				exit(EXIT_FAILURE);
 			}
-			handle_input(pollfd[i].fd, actions, action_count, event_input[i]);
+			handle_input(pollfd[i].fd, keys, key_count, event_input[i]);
 		}
 	}
 

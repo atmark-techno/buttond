@@ -47,9 +47,15 @@ $ buttond -i /dev/input/by-path/platform-gpio-keys-event \
 
 ### Notes
 
- - it is not possible to define multiple with same mode, even if
-long trigger time is different, because the action happens as soon
-as time has passed and not when key is released.
+ - Multiple actions for a key:
+   - short keys are handled when released, if released within timeout
+(default 1s). There can be only one.
+   - the longest long key is handled as soon as timeout (default 5s)
+elapses. For example, the above example will run poweroff as soon as
+10s ellapsed, without waiting for key release.
+   - if there are multiple long keys, time at release time is checked
+and the longest action whose timeout is shorter than hold time is
+executed, if any.
 
  - key source does not matter, if you have two devices which use the
 same key code start buttond once for each device instead.
