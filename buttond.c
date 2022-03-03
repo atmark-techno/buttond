@@ -22,10 +22,13 @@
 #include <time.h>
 #include <unistd.h>
 
+#define xassert(cond, fmt, args...) \
+	if (!(cond)) { \
+		fprintf(stderr, "ERROR: "fmt"\n", ##args); \
+		exit(EXIT_FAILURE); \
+	}
+
 static int debug = 0;
-#define MAX_INPUTS 32
-#define MAX_KEYS 32
-#define MAX_ACTIONS 10
 #define DEFAULT_LONG_PRESS_MSECS 5000
 #define DEFAULT_SHORT_PRESS_MSECS 1000
 #define DEBOUNCE_MSECS 10
@@ -136,11 +139,22 @@ struct action {
 };
 
 struct key {
+	/* key code */
 	uint16_t code;
+
+	/* whether ts_wakeup below is valid */
+	bool has_wakeup;
 
 	/* key actions */
 	int action_count;
-	struct action actions[MAX_ACTIONS];
+	struct action *actions;
+
+	/* when key was pressed - valid for state == KEY_PRESSED or KEY_DEBOUNCE */
+	struct timeval tv_pressed;
+	/* valid when KEY_DEBOUNCE */
+	struct timeval tv_released;
+	/* when next to wakeup if has_wakeup is set */
+	struct timespec ts_wakeup;
 
 	/* state machine:
 	 * - RELEASED/PRESSED state
@@ -153,14 +167,6 @@ struct key {
 		KEY_DEBOUNCE,
 		KEY_HANDLED,
 	} state;
-
-	/* when key was pressed - valid for state == KEY_PRESSED or KEY_DEBOUNCE */
-	struct timeval tv_pressed;
-	/* valid when KEY_DEBOUNCE */
-	struct timeval tv_released;
-	/* when next to wakeup - valid  when has_wakeup is true */
-	struct timespec ts_wakeup;
-	bool has_wakeup;
 };
 
 
@@ -273,7 +279,7 @@ static int compute_timeout(struct key *keys, int key_count) {
 		exit(EXIT_FAILURE);
 	}
 
-	for (i = 0; i <= key_count; i++) {
+	for (i = 0; i < key_count; i++) {
 		if (keys[i].has_wakeup) {
 			int64_t diff = time_diff_ts(&keys[i].ts_wakeup, &ts);
 			if (diff < 0)
@@ -315,7 +321,7 @@ static void handle_timeouts(struct key *keys, int key_count) {
 		exit(EXIT_FAILURE);
 	}
 
-	for (i = 0; i <= key_count; i++) {
+	for (i = 0; i < key_count; i++) {
 		if (keys[i].has_wakeup
 		    && (time_diff_ts(&keys[i].ts_wakeup, &ts) <= 0)) {
 
@@ -359,7 +365,7 @@ static void handle_input(int fd, struct key *keys, int key_count,
 		}
 
 		struct key *key = NULL;
-		for (int i = 0; i <= key_count; i++) {
+		for (int i = 0; i < key_count; i++) {
 			if (keys[i].code == event.code) {
 				key = &keys[i];
 				break;
@@ -396,7 +402,6 @@ static struct action *add_short_action(struct key *key) {
 		}
 	}
 	struct action *action = &key->actions[key->action_count];
-	key->action_count++;
 	action->type = SHORT_PRESS;
 	action->trigger_time = DEFAULT_SHORT_PRESS_MSECS;
 	return action;
@@ -405,7 +410,6 @@ static struct action *add_short_action(struct key *key) {
 static struct action *add_long_action(struct key *key) {
 	/* insert at the end, we'll move it when setting time */
 	struct action *action = &key->actions[key->action_count];
-	key->action_count++;
 	action->type = LONG_PRESS;
 	action->trigger_time = DEFAULT_LONG_PRESS_MSECS;
 	return action;
@@ -429,23 +433,34 @@ static void sort_actions(struct key *key) {
 		sizeof(key->actions[0]), sort_actions_compare);
 }
 
+static void *xcalloc(size_t nmemb, size_t size) {
+	void *ptr = calloc(nmemb, size);
+	xassert(ptr, "Allocation failure");
+	return ptr;
+}
+
+static void *xreallocarray(void *ptr, size_t nmemb, size_t size) {
+	ptr = realloc(ptr, nmemb * size);
+	xassert(ptr, "Allocation failure");
+	return ptr;
+}
+
 int main(int argc, char *argv[]) {
-	char const *event_input[MAX_INPUTS] = { };
-	struct key keys[MAX_KEYS] = { };
+	char const **event_inputs = NULL;
+	struct key *keys = NULL;
 	struct action *cur_action = NULL;
 	int input_count = 0;
 	int key_count = 0;
 	bool test_mode = false;
 
 	int c;
+	/* and real argument parsing now! */
 	while ((c = getopt_long(argc, argv, "i:s:l:a:t:vVh", long_options, NULL)) >= 0) {
 		switch (c) {
 		case 'i':
-			if (input_count >= MAX_INPUTS) {
-				fprintf(stderr, "Can only set up to %d inputs\n", MAX_INPUTS);
-				exit(EXIT_FAILURE);
-			}
-			event_input[input_count] = optarg;
+			event_inputs = xreallocarray(event_inputs, input_count + 1,
+					             sizeof(*event_inputs));
+			event_inputs[input_count] = optarg;
 			input_count++;
 			break;
 		case 's':
@@ -463,25 +478,24 @@ int main(int argc, char *argv[]) {
 				}
 			}
 			if (!cur_key) {
-				if (key_count >= MAX_KEYS) {
-					fprintf(stderr, "Only support up to %d bindings\n", MAX_KEYS);
-					exit(EXIT_FAILURE);
-				}
+				keys = xreallocarray(keys, key_count + 1,
+						     sizeof(*keys));
 				cur_key = &keys[key_count];
 				key_count++;
+				memset(cur_key, 0, sizeof(*cur_key));
 				cur_key->code = strtou16(optarg);
 				cur_key->state = KEY_RELEASED;
 			}
-			if (cur_key->action_count >= MAX_ACTIONS) {
-				fprintf(stderr, "Only support up to %d actions per key\n",
-					MAX_ACTIONS);
-				exit(EXIT_FAILURE);
-			}
+			cur_key->actions = xreallocarray(cur_key->actions,
+							 cur_key->action_count + 1,
+							 sizeof(*cur_key->actions));
 			if (c == 's') {
 				cur_action = add_short_action(cur_key);
 			} else {
 				cur_action = add_long_action(cur_key);
 			}
+			cur_action->action = NULL;
+			cur_key->action_count++;
 			break;
 		case 'a':
 			if (!cur_action) {
@@ -536,18 +550,18 @@ int main(int argc, char *argv[]) {
 		sort_actions(&keys[i]);
 	}
 
-	struct pollfd pollfd[MAX_INPUTS] = { };
+	struct pollfd *pollfd = xcalloc(input_count, sizeof(*pollfd));
 	for (int i = 0; i < input_count; i++) {
-		int fd = open(event_input[i], O_RDONLY|O_NONBLOCK);
+		int fd = open(event_inputs[i], O_RDONLY|O_NONBLOCK);
 		if (fd < 0) {
-			fprintf(stderr, "Open %s failed: %m\n", event_input[i]);
+			fprintf(stderr, "Open %s failed: %m\n", event_inputs[i]);
 			exit(EXIT_FAILURE);
 		}
 		c = CLOCK_MONOTONIC;
 		/* we use a pipe for testing which won't understand this */
 		if (!test_mode && ioctl(fd, EVIOCSCLOCKID, &c)) {
 			fprintf(stderr, "Could not request clock monotonic timestamps from %s, aborting\n",
-				event_input[i]);
+				event_inputs[i]);
 			exit(EXIT_FAILURE);
 		}
 
@@ -573,10 +587,10 @@ int main(int argc, char *argv[]) {
 				if (test_mode)
 					exit(0);
 				fprintf(stderr, "got HUP/ERR on %s, aborting\n",
-					event_input[i]);
+					event_inputs[i]);
 				exit(EXIT_FAILURE);
 			}
-			handle_input(pollfd[i].fd, keys, key_count, event_input[i]);
+			handle_input(pollfd[i].fd, keys, key_count, event_inputs[i]);
 		}
 	}
 
