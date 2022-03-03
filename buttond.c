@@ -393,6 +393,13 @@ int main(int argc, char *argv[]) {
 			actions[action_count].code = strtou16(optarg);
 			actions[action_count].action = NULL;
 			actions[action_count].state = KEY_RELEASED;
+			for (int i = 0; i < action_count; i++) {
+				if (actions[i].code == actions[action_count].code
+				    && actions[i].type == actions[action_count].type) {
+					fprintf(stderr, "It is not possible to specify a key multiple time\n");
+					exit(EXIT_FAILURE);
+				}
+			}
 			break;
 		case 'a':
 			if (action_count < 0) {
