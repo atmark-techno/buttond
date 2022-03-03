@@ -23,6 +23,7 @@
 #include <unistd.h>
 
 static int debug = 0;
+#define MAX_INPUTS 32
 #define MAX_ACTIONS 64
 #define DEFAULT_LONG_PRESS_MSECS 5000
 #define DEFAULT_SHORT_PRESS_MSECS 1000
@@ -96,6 +97,7 @@ static void help(char *argv0) {
 	printf("Usage: %s [options]\n", argv0);
 	printf("Options:\n");
 	printf("  -i, --input <file>: file to get event from e.g. /dev/input/event2\n");
+	printf("                      pass multiple times to monitor multiple files\n");
 	printf("  -s/--short <key>  [-t/--time <time ms>] -a/--action <command>: action on short key press\n");
 	printf("  -l/--long <key> [-t/--time <time ms>] -a/--action <command>: action on long key press\n");
 	printf("  -h, --help: show this help\n");
@@ -290,16 +292,62 @@ static void handle_timeouts(struct action *actions, int action_count) {
 	}
 }
 
+static void handle_input(int fd, struct action *actions, int action_count,
+			 const char *filename) {
+	struct input_event event;
+	int partial_read = 0;
+
+	while ((partial_read = read_safe(fd, &event, sizeof(event), partial_read))
+			== sizeof(event)) {
+		int key;
+
+		/* ignore non-keyboard events */
+		if (event.type != 1)
+			continue;
+		for (key = 0; key <= action_count; key++) {
+			if (actions[key].code == event.code) {
+				break;
+			}
+		}
+		/* ignore unconfigured key */
+		if (key > action_count) {
+			if (debug > 1)
+				printf("%d %s: ignore\n", event.code,
+					event.value ? "pressed" : "released");
+			continue;
+		}
+
+		handle_key(&event, &actions[key]);
+	}
+	if (partial_read < 0) {
+		fprintf(stderr, "read error: %d\n", -partial_read);
+		exit(EXIT_FAILURE);
+	}
+	if (partial_read > 0) {
+		fprintf(stderr, "got a partial read from %s: %d. Aborting.\n",
+			filename, partial_read);
+		exit(EXIT_FAILURE);
+	}
+}
+
+
+
 int main(int argc, char *argv[]) {
-	char const *event_input = "/dev/input/event0";
+	char const *event_input[MAX_INPUTS] = { };
 	struct action actions[MAX_ACTIONS];
+	int input_count = 0;
 	int action_count = -1;
 
 	int c;
 	while ((c = getopt_long(argc, argv, "i:s:l:a:t:vVh", long_options, NULL)) >= 0) {
 		switch (c) {
 		case 'i':
-			event_input = optarg;
+			if (input_count >= MAX_INPUTS) {
+				fprintf(stderr, "Can only set up to %d inputs\n", MAX_INPUTS);
+				exit(EXIT_FAILURE);
+			}
+			event_input[input_count] = optarg;
+			input_count++;
 			break;
 		case 's':
 		case 'l':
@@ -353,6 +401,10 @@ int main(int argc, char *argv[]) {
 			exit(EXIT_FAILURE);
 		}
 	}
+	if (input_count <= 0) {
+		fprintf(stderr, "No input have been given, exiting\n");
+		exit(EXIT_FAILURE);
+	}
 	if (action_count < 0 && debug <= 1) {
 		/* allow no action with full debug to configure new keys the first time */
 		fprintf(stderr, "No action defined, exiting\n");
@@ -363,58 +415,43 @@ int main(int argc, char *argv[]) {
 		exit(EXIT_FAILURE);
 	}
 
-	int fd = open(event_input, O_RDONLY|O_NONBLOCK);
-	if (fd < 0) {
-		fprintf(stderr, "Open %s failed: %d\n", event_input, errno);
-		exit(EXIT_FAILURE);
-	}
+	struct pollfd pollfd[MAX_INPUTS] = { };
+	for (int i = 0; i < input_count; i++) {
+		int fd = open(event_input[i], O_RDONLY|O_NONBLOCK);
+		if (fd < 0) {
+			fprintf(stderr, "Open %s failed: %d\n", event_input[i], errno);
+			exit(EXIT_FAILURE);
+		}
+		c = CLOCK_MONOTONIC;
+		if (ioctl(fd, EVIOCSCLOCKID, &c)) {
+			fprintf(stderr, "Could not request clock monotonic timestamps from events\n");
+			exit(EXIT_FAILURE);
+		}
 
-	c = CLOCK_MONOTONIC;
-	if (ioctl(fd, EVIOCSCLOCKID, &c)) {
-		fprintf(stderr, "Could not request clock monotonic timestamps from events\n");
-		exit(EXIT_FAILURE);
+		pollfd[i].fd = fd;
+		pollfd[i].events = POLLIN;
 	}
-
-	struct pollfd pollfd = {
-		.fd = fd,
-		.events = POLLIN,
-	};
-	struct input_event event;
-	int partial_read = 0;
 
 	while (1) {
 		int timeout = compute_timeout(actions, action_count);
-		int n = poll(&pollfd, 1, timeout);
+		int n = poll(pollfd, input_count, timeout);
+		if (n < 0) {
+			fprintf(stderr, "Poll failure: %d\n", errno);
+			exit(EXIT_FAILURE);
+		}
 
 		handle_timeouts(actions, action_count);
 		if (n == 0)
 			continue;
-
-		while ((partial_read = read_safe(fd, &event, sizeof(event), partial_read))
-				== sizeof(event)) {
-			int key;
-
-			/* ignore non-keyboard events */
-			if (event.type != 1)
+		for (int i = 0; i < input_count; i++) {
+			if (pollfd[i].revents == 0)
 				continue;
-			for (key = 0; key <= action_count; key++) {
-				if (actions[key].code == event.code) {
-					break;
-				}
+			if (!(pollfd[i].revents & POLLIN)) {
+				fprintf(stderr, "got HUP/ERR on %s, aborting\n",
+					event_input[i]);
+				exit(EXIT_FAILURE);
 			}
-			/* ignore unconfigured key */
-			if (key > action_count) {
-				if (debug > 1)
-					printf("%d %s: ignore\n", event.code,
-						event.value ? "pressed" : "released");
-				continue;
-			}
-
-			handle_key(&event, &actions[key]);
-		}
-		if (partial_read < 0) {
-			fprintf(stderr, "read error: %d\n", -partial_read);
-			exit(EXIT_FAILURE);
+			handle_input(pollfd[i].fd, actions, action_count, event_input[i]);
 		}
 	}
 
