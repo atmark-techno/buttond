@@ -1,0 +1,7 @@
+#!/sbin/openrc-run
+
+name="button watching daemon"
+description="Run actions when buttons are pressed"
+
+command=/usr/bin/buttond
+command_args="$BUTTOND_ARGS"
