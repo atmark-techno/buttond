@@ -65,23 +65,35 @@ add_check() {
 }
 
 fail() {
-	printf "%s\n" "$@" >&2
+	printf "check $testname failed: %s\n" "$@" >&2
 	FAIL=$((FAIL+1))
 }
 
 check_all() {
-	local file testname
+	local file check testname tmp
 
 	for file in "${!CHECKS[@]}"; do
 		testname="${CHECKS[$file]}"
 		if [[ -n "${PROCESSES[$testname]}" ]]; then
-			wait "${PROCESSES[$testname]}" || fail "test $testname returned non-zero"
+			wait "${PROCESSES[$testname]}" || fail "returned non-zero"
 			unset "PROCESSES[$testname]"
 		fi
+		check=${file%%-*}
+		file=${file#*-}
 
-		case "$file" in
-		-*) file="${file#-}"; [[ -e "${file#-}" ]] && fail "check $testname failed: $file exists";;
-		*) [[ -e "${file#-}" ]] || fail "check $testname failed: $file does not exist";;
+		case "$check" in
+		ne)
+			[[ -e "$file" ]] && fail "$file exists"
+			;;
+		e)
+			[[ -e "$file" ]] || fail "$file does not exist"
+			;;
+		l*)
+			check="${check#l}"
+			tmp="$(wc -l "$file")"
+			tmp="${tmp%% *}"
+			[[ "$tmp" = "$check" ]] || fail "Expected $check lines, got $tmp"
+			;;
 		esac 
 	done
 }
@@ -89,42 +101,47 @@ check_all() {
 # tests take time to run by definition: run all in background then check.
 run_pattern shortkey 148,1,100 148,0,0 -- \
 	-s 148 -a "touch shortkey"
-add_check shortkey shortkey
+add_check shortkey e-shortkey
 
 run_pattern shortkey_norun 148,1,1100 148,0,0 -- \
 	-s 148 -a "touch shortkey_norun"
-add_check shortkey_norun -shortkey_norun
+add_check shortkey_norun ne-shortkey_norun
+
+run_pattern short_twohits 148,1,100 148,0,100 148,1,100 148,0,0 -- \
+	-s 148 -a "echo short" > short_twohits
+add_check short_twohits l2-short_twohits
+
 
 run_pattern longkey 148,1,2200 -- \
 	-l 148 -t 2000 -a "touch longkey"
-add_check longkey longkey
+add_check longkey e-longkey
 
 run_pattern longkey_norun 148,1,100 148,0,2000 -- \
 	-l 148 -t 2000 -a "touch longkey_norun"
-add_check longkey_norun -longkey_norun
+add_check longkey_norun ne-longkey_norun
 
 run_pattern shortlong 148,1,100 148,0,100 148,1,2200 -- \
 	-s 148 -a "touch shortlong_short" \
 	-l 148 -t 2000 -a "touch shortlong_long"
-add_check shortlong shortlong_short shortlong_long
+add_check shortlong e-shortlong_short e-shortlong_long
 
 run_pattern shortlonglong_1 148,1,100 148,0,100 -- \
 	-s 148 -a "touch shortlonglong_1_short" \
 	-l 148 -t 1000 -a "touch shortlonglong_1_long" \
 	-l 148 -t 2000 -a "touch shortlonglong_1_long2"
-add_check shortlong shortlonglong_1_short -shortlonglong_1_long -shortlonglong_1_long2
+add_check shortlonglong_1 e-shortlonglong_1_short ne-shortlonglong_1_long ne-shortlonglong_1_long2
 
 run_pattern shortlonglong_2 148,1,1100 148,0,100 -- \
 	-s 148 -a "touch shortlonglong_2_short" \
 	-l 148 -t 2000 -a "touch shortlonglong_2_long2" \
 	-l 148 -t 1000 -a "touch shortlonglong_2_long"
-add_check shortlong -shortlonglong_2_short shortlonglong_2_long -shortlonglong_2_long2
+add_check shortlonglong_2 ne-shortlonglong_2_short e-shortlonglong_2_long ne-shortlonglong_2_long2
 
 run_pattern shortlonglong_3 148,1,2200 -- \
 	-l 148 -t 2000 -a "touch shortlonglong_3_long2" \
 	-s 148 -a "touch shortlonglong_3_short" \
 	-l 148 -t 1000 -a "touch shortlonglong_3_long"
-add_check shortlong -shortlonglong_3_short -shortlonglong_3_long shortlonglong_3_long2
+add_check shortlonglong_3 ne-shortlonglong_3_short ne-shortlonglong_3_long e-shortlonglong_3_long2
 
 check_all
 
