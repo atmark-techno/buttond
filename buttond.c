@@ -185,12 +185,33 @@ static uint32_t strtoint(const char *str) {
 	return val;
 }
 
-static void handle_key(struct input_event *event, struct action *action) {
-	if (debug > 1)
-		printf("%d %s %ld.%03ld\n", event->code,
-		       event->value ? "pressed" : "released",
-		       event->time.tv_sec, event->time.tv_usec / 1000);
+static void print_key(struct input_event *event, const char *filename,
+		      const char *message) {
+	if (debug < 1)
+		return;
+	switch (event->type) {
+	case 0:
+		/* extra info pertaining previous event: don't print */
+		return;
+	case 1:
+		printf("[%ld.%03ld] %s%s%d %s: %s\n",
+		       event->time.tv_sec, event->time.tv_usec / 1000,
+		       debug > 2 ? filename : "",
+		       debug > 2 ? " " : "",
+		       event->code, event->value ? "pressed" : "released",
+		       message);
+		break;
+	default:
+		printf("[%ld.%03ld] %s%s%d %d %d: %s\n",
+		       event->time.tv_sec, event->time.tv_usec / 1000,
+		       debug > 2 ? filename : "",
+		       debug > 2 ? " " : "",
+		       event->type, event->code, event->value,
+		       message);
+	}
+}
 
+static void handle_key(struct input_event *event, struct action *action) {
 	switch (action->state) {
 	case KEY_RELEASED:
 	case KEY_DEBOUNCE:
@@ -302,8 +323,12 @@ static void handle_input(int fd, struct action *actions, int action_count,
 		int key;
 
 		/* ignore non-keyboard events */
-		if (event.type != 1)
+		if (event.type != 1) {
+			if (debug > 2)
+				print_key(&event, filename, "non-keyboard event ignored");
 			continue;
+		}
+
 		for (key = 0; key <= action_count; key++) {
 			if (actions[key].code == event.code) {
 				break;
@@ -312,10 +337,10 @@ static void handle_input(int fd, struct action *actions, int action_count,
 		/* ignore unconfigured key */
 		if (key > action_count) {
 			if (debug > 1)
-				printf("%d %s: ignore\n", event.code,
-					event.value ? "pressed" : "released");
+				print_key(&event, filename, "ignored");
 			continue;
 		}
+		print_key(&event, filename, "processing");
 
 		handle_key(&event, &actions[key]);
 	}
@@ -424,8 +449,8 @@ int main(int argc, char *argv[]) {
 		}
 		c = CLOCK_MONOTONIC;
 		if (ioctl(fd, EVIOCSCLOCKID, &c)) {
-			fprintf(stderr, "Could not request clock monotonic timestamps from events\n");
-			exit(EXIT_FAILURE);
+			fprintf(stderr, "Could not request clock monotonic timestamps from %s, continuing anyway\n",
+				event_input[i]);
 		}
 
 		pollfd[i].fd = fd;
