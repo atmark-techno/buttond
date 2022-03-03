@@ -1,4 +1,0 @@
-# buttond - button handling daemon
-
-simple evdev daemon that reads a /dev/input/eventX file and runs configured
-action if configured key has been pressed for configured time
