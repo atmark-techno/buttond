@@ -433,6 +433,11 @@ int main(int argc, char *argv[]) {
 			exit(EXIT_FAILURE);
 		}
 	}
+	if (optind >= 0 && optind < argc) {
+		fprintf(stderr, "Non-option argument: %s. Did you forget to quote action?\n",
+			argv[optind]);
+		exit(EXIT_FAILURE);
+	}
 	if (input_count <= 0) {
 		fprintf(stderr, "No input have been given, exiting\n");
 		exit(EXIT_FAILURE);
