@@ -175,14 +175,10 @@ static uint16_t strtou16(const char *str) {
 	long val;
 
 	val = strtol(str, &endptr, 0);
-	if (*endptr != 0) {
-		fprintf(stderr, "Argument must be a full integer");
-		exit(EXIT_FAILURE);
-	}
-	if (val < 0 || val > 0xffff) {
-		fprintf(stderr, "Argument must be a 16 bit integer");
-		exit(EXIT_FAILURE);
-	}
+	xassert(*endptr == 0,
+		"Argument %s must be a full integer", str);
+	xassert(val >= 0 && val <= 0xffff,
+		"Argument %s must be a 16 bit integer", str);
 	errno = 0;
 	return val;
 }
@@ -192,14 +188,10 @@ static uint32_t strtoint(const char *str) {
 	long val;
 
 	val = strtol(str, &endptr, 0);
-	if (*endptr != 0) {
-		fprintf(stderr, "Argument must be a full integer");
-		exit(EXIT_FAILURE);
-	}
-	if (val < INT_MIN || val > INT_MAX) {
-		fprintf(stderr, "Argument must be a C int");
-		exit(EXIT_FAILURE);
-	}
+	xassert(*endptr == 0,
+		"Argument %s must be a full integer", str);
+	xassert(val >= INT_MIN && val <= INT_MAX,
+		"Argument %s must fit in a C int", str);
 	errno = 0;
 	return val;
 }
@@ -274,10 +266,8 @@ static int compute_timeout(struct key *keys, int key_count) {
 	int timeout = -1;
 	struct timespec ts;
 
-	if (clock_gettime(CLOCK_MONOTONIC, &ts) < 0) {
-		fprintf(stderr, "Could not get time: %m\n");
-		exit(EXIT_FAILURE);
-	}
+	xassert(clock_gettime(CLOCK_MONOTONIC, &ts) == 0,
+		"Could not get time: %m");
 
 	for (i = 0; i < key_count; i++) {
 		if (keys[i].has_wakeup) {
@@ -298,8 +288,7 @@ static bool action_match(struct action *action, int time) {
 	case SHORT_PRESS:
 		return time < action->trigger_time;
 	default:
-		fprintf(stderr, "invalid action!!\n");
-		exit(EXIT_FAILURE);
+		xassert(false, "invalid action!!");
 	}
 }
 
@@ -316,10 +305,8 @@ static void handle_timeouts(struct key *keys, int key_count) {
 	int i;
 	struct timespec ts;
 
-	if (clock_gettime(CLOCK_MONOTONIC, &ts) < 0) {
-		fprintf(stderr, "Could not get time: %m\n");
-		exit(EXIT_FAILURE);
-	}
+	xassert(clock_gettime(CLOCK_MONOTONIC, &ts) == 0,
+		"Could not get time: %m");
 
 	for (i = 0; i < key_count; i++) {
 		if (keys[i].has_wakeup
@@ -395,11 +382,9 @@ static void handle_input(int fd, struct key *keys, int key_count,
 static struct action *add_short_action(struct key *key) {
 	/* can only have one short key */
 	for (int i = 0; i < key->action_count; i++) {
-		if (key->actions[i].type == SHORT_PRESS) {
-			fprintf(stderr, "duplicate short key for key %d, aborting.\n",
-				key->code);
-			exit(EXIT_FAILURE);
-		}
+		xassert(key->actions[i].type != SHORT_PRESS,
+			"duplicate short key for key %d, aborting.",
+			key->code);
 	}
 	struct action *action = &key->actions[key->action_count];
 	action->type = SHORT_PRESS;
@@ -465,10 +450,8 @@ int main(int argc, char *argv[]) {
 			break;
 		case 's':
 		case 'l':
-			if (cur_action && cur_action->action == NULL) {
-				fprintf(stderr, "Must set action before specifying next key!\n");
-				exit(EXIT_FAILURE);
-			}
+			xassert(!cur_action || cur_action->action != NULL,
+				"Must set action before specifying next key!");
 			uint16_t code = strtou16(optarg);
 			struct key *cur_key = NULL;
 			for (int i = 0; i < key_count; i++) {
@@ -498,17 +481,13 @@ int main(int argc, char *argv[]) {
 			cur_key->action_count++;
 			break;
 		case 'a':
-			if (!cur_action) {
-				fprintf(stderr, "Action can only be provided after setting key code\n");
-				exit(EXIT_FAILURE);
-			}
+			xassert(cur_action,
+				"Action can only be provided after setting key code");
 			cur_action->action = optarg;
 			break;
 		case 't':
-			if (!cur_action) {
-				fprintf(stderr, "Action can only be provided after setting key code\n");
-				exit(EXIT_FAILURE);
-			}
+			xassert(cur_action,
+				"Action timeout can only be set after setting key code");
 			cur_action->trigger_time = strtoint(optarg);
 			break;
 		case 'v':
@@ -528,24 +507,15 @@ int main(int argc, char *argv[]) {
 			exit(EXIT_FAILURE);
 		}
 	}
-	if (optind >= 0 && optind < argc) {
-		fprintf(stderr, "Non-option argument: %s. Did you forget to quote action?\n",
-			argv[optind]);
-		exit(EXIT_FAILURE);
-	}
-	if (input_count <= 0) {
-		fprintf(stderr, "No input have been given, exiting\n");
-		exit(EXIT_FAILURE);
-	}
-	if (key_count <= 0 && debug <= 1) {
-		/* allow no action with full debug to configure new keys the first time */
-		fprintf(stderr, "No action defined, exiting\n");
-		exit(EXIT_FAILURE);
-	}
-	if (cur_action && cur_action->action == NULL) {
-		fprintf(stderr, "Last key press was defined without action\n");
-		exit(EXIT_FAILURE);
-	}
+	xassert(optind >= argc,
+		"Non-option argument: %s. Did you forget to quote action?",
+		optind >= 0 ? argv[optind] : "???");
+	xassert(input_count > 0,
+		"No input have been given, exiting");
+	xassert(key_count > 0 || debug > 1,
+		"No action given, exiting");
+	xassert(!cur_action || cur_action->action != NULL,
+		"Last key press was defined without action");
 	for (int i = 0; i < key_count; i++) {
 		sort_actions(&keys[i]);
 	}
@@ -553,17 +523,13 @@ int main(int argc, char *argv[]) {
 	struct pollfd *pollfd = xcalloc(input_count, sizeof(*pollfd));
 	for (int i = 0; i < input_count; i++) {
 		int fd = open(event_inputs[i], O_RDONLY|O_NONBLOCK);
-		if (fd < 0) {
-			fprintf(stderr, "Open %s failed: %m\n", event_inputs[i]);
-			exit(EXIT_FAILURE);
-		}
+		xassert(fd >= 0,
+			"Open %s failed: %m", event_inputs[i]);
 		c = CLOCK_MONOTONIC;
 		/* we use a pipe for testing which won't understand this */
-		if (!test_mode && ioctl(fd, EVIOCSCLOCKID, &c)) {
-			fprintf(stderr, "Could not request clock monotonic timestamps from %s, aborting\n",
-				event_inputs[i]);
-			exit(EXIT_FAILURE);
-		}
+		xassert(test_mode || ioctl(fd, EVIOCSCLOCKID, &c) == 0,
+			"Could not request clock monotonic timestamps from %s, aborting",
+			event_inputs[i]);
 
 		pollfd[i].fd = fd;
 		pollfd[i].events = POLLIN;
@@ -572,10 +538,9 @@ int main(int argc, char *argv[]) {
 	while (1) {
 		int timeout = compute_timeout(keys, key_count);
 		int n = poll(pollfd, input_count, timeout);
-		if (n < 0) {
-			fprintf(stderr, "Poll failure: %m\n");
-			exit(EXIT_FAILURE);
-		}
+		if (n < 0 && errno == EINTR)
+			continue;
+		xassert(n >= 0, "Poll failure: %m");
 
 		handle_timeouts(keys, key_count);
 		if (n == 0)
@@ -586,9 +551,8 @@ int main(int argc, char *argv[]) {
 			if (!(pollfd[i].revents & POLLIN)) {
 				if (test_mode)
 					exit(0);
-				fprintf(stderr, "got HUP/ERR on %s, aborting\n",
+				xassert(false, "got HUP/ERR on %s, aborting",
 					event_inputs[i]);
-				exit(EXIT_FAILURE);
 			}
 			handle_input(pollfd[i].fd, keys, key_count, event_inputs[i]);
 		}
