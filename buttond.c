@@ -237,7 +237,7 @@ static int compute_timeout(struct action *actions, int action_count) {
 	struct timespec ts;
 
 	if (clock_gettime(CLOCK_MONOTONIC, &ts) < 0) {
-		fprintf(stderr, "Could not get time: %d\n", errno);
+		fprintf(stderr, "Could not get time: %m\n");
 		exit(EXIT_FAILURE);
 	}
 
@@ -258,7 +258,7 @@ static void handle_timeouts(struct action *actions, int action_count) {
 	struct timespec ts;
 
 	if (clock_gettime(CLOCK_MONOTONIC, &ts) < 0) {
-		fprintf(stderr, "Could not get time: %d\n", errno);
+		fprintf(stderr, "Could not get time: %m\n");
 		exit(EXIT_FAILURE);
 	}
 
@@ -419,7 +419,7 @@ int main(int argc, char *argv[]) {
 	for (int i = 0; i < input_count; i++) {
 		int fd = open(event_input[i], O_RDONLY|O_NONBLOCK);
 		if (fd < 0) {
-			fprintf(stderr, "Open %s failed: %d\n", event_input[i], errno);
+			fprintf(stderr, "Open %s failed: %m\n", event_input[i]);
 			exit(EXIT_FAILURE);
 		}
 		c = CLOCK_MONOTONIC;
@@ -436,7 +436,7 @@ int main(int argc, char *argv[]) {
 		int timeout = compute_timeout(actions, action_count);
 		int n = poll(pollfd, input_count, timeout);
 		if (n < 0) {
-			fprintf(stderr, "Poll failure: %d\n", errno);
+			fprintf(stderr, "Poll failure: %m\n");
 			exit(EXIT_FAILURE);
 		}
 
