@@ -28,7 +28,7 @@ run_pattern() {
 		shift
 	done
 
-	"$GEN_EVENTS" "${keys[@]}" | "$BUTTOND" -i /dev/stdin "$@" 2>/dev/null &
+	"$GEN_EVENTS" "${keys[@]}" | "$BUTTOND" --test_mode -i /dev/stdin "$@" &
 	PROCESSES[$testname]=$!
 }
 
@@ -53,7 +53,7 @@ check_all() {
 	for file in "${!CHECKS[@]}"; do
 		testname="${CHECKS[$file]}"
 		if [[ -n "${PROCESSES[$testname]}" ]]; then
-			wait "${PROCESSES[$testname]}"
+			wait "${PROCESSES[$testname]}" || fail "test $testname returned non-zero"
 			unset "PROCESSES[$testname]"
 		fi
 

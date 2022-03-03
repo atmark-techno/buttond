@@ -78,6 +78,8 @@ static void time_ts2tv(struct timeval *tv, struct timespec *base, int msec) {
 	tv->tv_usec %= USECS_IN_SEC;
 }
 
+#define OPT_TEST 257
+
 static struct option long_options[] = {
 	{"input",	required_argument,	0, 'i' },
 	{"short",	required_argument,	0, 's' },
@@ -87,6 +89,7 @@ static struct option long_options[] = {
 	{"verbose",	no_argument,		0, 'v' },
 	{"version",	no_argument,		0, 'V' },
 	{"help",	no_argument,		0, 'h' },
+	{"test_mode",	no_argument,		0, OPT_TEST },
 	{0,		0,			0,  0  }
 };
 
@@ -432,6 +435,7 @@ int main(int argc, char *argv[]) {
 	struct action *cur_action = NULL;
 	int input_count = 0;
 	int key_count = 0;
+	bool test_mode = false;
 
 	int c;
 	while ((c = getopt_long(argc, argv, "i:s:l:a:t:vVh", long_options, NULL)) >= 0) {
@@ -502,6 +506,9 @@ int main(int argc, char *argv[]) {
 		case 'h':
 			help(argv[0]);
 			exit(EXIT_SUCCESS);
+		case OPT_TEST:
+			test_mode = true;
+			break;
 		default:
 			help(argv[0]);
 			exit(EXIT_FAILURE);
@@ -537,9 +544,11 @@ int main(int argc, char *argv[]) {
 			exit(EXIT_FAILURE);
 		}
 		c = CLOCK_MONOTONIC;
-		if (ioctl(fd, EVIOCSCLOCKID, &c)) {
-			fprintf(stderr, "Could not request clock monotonic timestamps from %s, continuing anyway\n",
+		/* we use a pipe for testing which won't understand this */
+		if (!test_mode && ioctl(fd, EVIOCSCLOCKID, &c)) {
+			fprintf(stderr, "Could not request clock monotonic timestamps from %s, aborting\n",
 				event_input[i]);
+			exit(EXIT_FAILURE);
 		}
 
 		pollfd[i].fd = fd;
@@ -561,6 +570,8 @@ int main(int argc, char *argv[]) {
 			if (pollfd[i].revents == 0)
 				continue;
 			if (!(pollfd[i].revents & POLLIN)) {
+				if (test_mode)
+					exit(0);
 				fprintf(stderr, "got HUP/ERR on %s, aborting\n",
 					event_input[i]);
 				exit(EXIT_FAILURE);
