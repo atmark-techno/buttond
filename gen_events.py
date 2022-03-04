@@ -16,7 +16,6 @@ def main():
     # wait some for buttond init
     sleep(1)
     for command in sys.argv[1:]:
-        print(command)
         [key, state, time] = command.split(',')
         gen_event(int(key), int(state))
         sleep(int(time)/1000)
