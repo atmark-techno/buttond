@@ -28,6 +28,12 @@
 		exit(EXIT_FAILURE); \
 	}
 
+/* debug:
+ * -v (> 0/set): info message e.g. registered key presses
+ * -vv (> 1): ignored keys also printed
+ * -vvv (> 2): add non-keyboard events and file names
+ * -vvvv (> 3): add timeout/wakeup related debugs
+ */
 static int debug = 0;
 #define DEFAULT_LONG_PRESS_MSECS 5000
 #define DEFAULT_SHORT_PRESS_MSECS 1000
@@ -66,6 +72,15 @@ static int64_t time_diff_ts(struct timespec *ts1, struct timespec *ts2) {
 static int64_t time_diff_tv(struct timeval *tv1, struct timeval *tv2) {
 	return (tv1->tv_usec - tv2->tv_usec) / USECS_IN_MSEC
 		+ (tv1->tv_sec - tv2->tv_sec) * 1000;
+}
+
+/* add number of msec to given timespec */
+static void time_add_ts(struct timespec *ts, int msec) {
+	ts->tv_nsec += msec * NSECS_IN_MSEC;
+	if (ts->tv_nsec >= NSECS_IN_SEC) {
+		ts->tv_sec += ts->tv_nsec / NSECS_IN_SEC;
+		ts->tv_nsec = ts->tv_nsec / NSECS_IN_SEC;
+	}
 }
 
 /* convert timeval to timespec and add offset msec */
@@ -229,17 +244,23 @@ static void handle_key(struct input_event *event, struct key *key) {
 		/* new key press -- can be a release if program started with key or handled long press */
 		if (event->value == 0)
 			break;
-		/* don't reset timestamp on debounce */
+
+		/* don't reset timestamp/wakeup on debounce */
 		if (key->state == KEY_RELEASED) {
 			key->tv_pressed = event->time;
 		}
 		key->state = KEY_PRESSED;
 
+		/* short action is always first, so if last action is not LONG there
+		 * are none. We only set a timeout if we have one.*/
 		struct action *action = &key->actions[key->action_count-1];
 		if (action->type == LONG_PRESS) {
 			key->has_wakeup = true;
 			time_tv2ts(&key->ts_wakeup, &key->tv_pressed,
 				   action->trigger_time);
+		} else {
+			/* ... but make sure we cancel any other remaining wakeup */
+			key->has_wakeup = false;
 		}
 		break;
 	case KEY_PRESSED:
@@ -250,8 +271,9 @@ static void handle_key(struct input_event *event, struct key *key) {
 		key->state = KEY_DEBOUNCE;
 		key->tv_released = event->time;
 		key->has_wakeup = true;
-		time_tv2ts(&key->ts_wakeup, &key->tv_pressed,
-			   DEBOUNCE_MSECS);
+		xassert(clock_gettime(CLOCK_MONOTONIC, &key->ts_wakeup) == 0,
+			"Could not get time: %m");
+		time_add_ts(&key->ts_wakeup, DEBOUNCE_MSECS);
 		break;
 	case KEY_HANDLED:
 		/* ignore until key down */
@@ -278,6 +300,14 @@ static int compute_timeout(struct key *keys, int key_count) {
 				timeout = diff;
 		}
 	}
+	if (debug > 3) {
+		if (timeout >= 0) {
+			printf("wakeup scheduled in %d\n", timeout);
+		} else {
+			printf("no wakeup scheduled\n");
+		}
+	}
+
 	return timeout;
 }
 
@@ -311,17 +341,22 @@ static void handle_timeouts(struct key *keys, int key_count) {
 	for (i = 0; i < key_count; i++) {
 		if (keys[i].has_wakeup
 		    && (time_diff_ts(&keys[i].ts_wakeup, &ts) <= 0)) {
+			if (debug > 3)
+				printf("we are %ld ahead of timeout\n",
+				       time_diff_ts(&keys[i].ts_wakeup, &ts));
 
 			if (keys[i].state != KEY_DEBOUNCE) {
 				/* key still pressed - set artifical release time */
 				time_ts2tv(&keys[i].tv_released, &ts, 0);
 			}
 
-			int64_t diff = time_diff_tv(&keys[i].tv_released, &keys[i].tv_pressed);
+			int64_t diff = time_diff_tv(&keys[i].tv_released,
+						    &keys[i].tv_pressed);
 			struct action *action = find_key_action(&keys[i], diff);
 			if (action) {
 				if (debug)
-					printf("running %s\n", action->action);
+					printf("running %s after %"PRId64" ms\n",
+					       action->action, diff);
 				system(action->action);
 			} else if (debug) {
 				printf("ignoring key %d released after %"PRId64" ms\n",

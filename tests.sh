@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# shellcheck disable=SC2094 ## incorrectly thinks we read/write from same file
+
 TESTDIR=$(mktemp -d /tmp/buttond.XXXXXX)
 trap "rm -rf '$TESTDIR'" EXIT
 
@@ -111,6 +113,9 @@ run_pattern short_twohits 148,1,100 148,0,100 148,1,100 148,0,0 -- \
 	-s 148 -a "echo short" > short_twohits
 add_check short_twohits l2-short_twohits
 
+run_pattern short_debounce 148,1,100 148,0,5 148,1,100 148,0,0 -- \
+	-s 148 -a "echo short" > short_debounce
+add_check short_debounce l1-short_debounce
 
 run_pattern longkey 148,1,2200 -- \
 	-l 148 -t 2000 -a "touch longkey"
@@ -119,6 +124,14 @@ add_check longkey e-longkey
 run_pattern longkey_norun 148,1,100 148,0,2000 -- \
 	-l 148 -t 2000 -a "touch longkey_norun"
 add_check longkey_norun ne-longkey_norun
+
+run_pattern long_twohits 148,1,1100 148,0,100 148,1,1100 148,0,0 -- \
+	-l 148 -t 1000 -a "echo long" > long_twohits
+add_check long_twohits l2-long_twohits
+
+run_pattern long_debounce 148,1,500 148,0,5 148,1,500 148,0,0 -- \
+	-l 148 -t 1000 -a "echo long" > long_debounce
+add_check long_debounce l1-long_debounce
 
 run_pattern shortlong 148,1,100 148,0,100 148,1,2200 -- \
 	-s 148 -a "touch shortlong_short" \
