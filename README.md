@@ -65,9 +65,12 @@ would:
       - keypress >= 10s: run action2 10s after pushdown
 
 
- - key source does not matter, if you have two devices which use the
+ - Key source does not matter, if you have two devices which use the
 same key code start buttond once for each device instead.
 
  - Key presses are debounced. Releasing the key for less than 10ms will
 not trigger anything, and keep counting time from initial key press.  
 Actions "on release" actually happen 10ms after release.
+
+ - For devices that might disappear (e.g. usb keyboard), it's possible
+to use -I instead of -i to use inotify to wait for it to come back

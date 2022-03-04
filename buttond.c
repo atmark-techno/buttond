@@ -4,7 +4,7 @@
  * Copyright (c) 2021 Atmark Techno,Inc.
  */
 
-#define _POSIX_C_SOURCE 199309L
+#define _POSIX_C_SOURCE 200809L
 #include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/inotify.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <time.h>
@@ -35,12 +36,13 @@
  * -vvvv (> 3): add timeout/wakeup related debugs
  */
 static int debug = 0;
+static int test_mode = 0;
 #define DEFAULT_LONG_PRESS_MSECS 5000
 #define DEFAULT_SHORT_PRESS_MSECS 1000
 #define DEBOUNCE_MSECS 10
 
-ssize_t read_safe(int fd, void *buf, size_t count, size_t partial_read) {
-	size_t total = partial_read % count;
+ssize_t read_safe(int fd, void *buf, ssize_t count) {
+	ssize_t total = 0;
 
 	while (total < count) {
 		ssize_t n;
@@ -49,7 +51,7 @@ ssize_t read_safe(int fd, void *buf, size_t count, size_t partial_read) {
 		if (n < 0 && errno == EINTR)
 			continue;
 		else if (n < 0)
-			return errno == EAGAIN ? 0 : -errno;
+			return errno == EAGAIN ? total : -errno;
 		else if (n == 0)
 			break;
 		total += n;
@@ -120,6 +122,7 @@ static void help(char *argv0) {
 	printf("Options:\n");
 	printf("  -i, --input <file>: file to get event from e.g. /dev/input/event2\n");
 	printf("                      pass multiple times to monitor multiple files\n");
+	printf("  -I <file>: same as -i, except if file disappears wait for it to come back\n");
 	printf("  -s/--short <key>  [-t/--time <time ms>] -a/--action <command>: action on short key press\n");
 	printf("  -l/--long <key> [-t/--time <time ms>] -a/--action <command>: action on long key press\n");
 	printf("  -h, --help: show this help\n");
@@ -182,6 +185,13 @@ struct key {
 		KEY_DEBOUNCE,
 		KEY_HANDLED,
 	} state;
+};
+
+struct input_file {
+	/* first is full path, second is path in directory */
+	char *filename;
+	char *dirent;
+	int inotify_wd;
 };
 
 
@@ -372,46 +382,60 @@ static void handle_timeouts(struct key *keys, int key_count) {
 	}
 }
 
-static void handle_input(int fd, struct key *keys, int key_count,
+static void handle_input_event(struct input_event *event,
+			       struct key *keys, int key_count,
+			       const char *filename) {
+	/* ignore non-keyboard events */
+	if (event->type != 1) {
+		if (debug > 2)
+			print_key(event, filename, "non-keyboard event ignored");
+		return;
+	}
+
+	struct key *key = NULL;
+	for (int i = 0; i < key_count; i++) {
+		if (keys[i].code == event->code) {
+			key = &keys[i];
+			break;
+		}
+	}
+	/* ignore unconfigured key */
+	if (!key) {
+		if (debug > 1)
+			print_key(event, filename, "ignored");
+		return;
+	}
+	print_key(event, filename, "processing");
+
+	handle_key(event, key);
+}
+
+
+static int handle_input(int fd, struct key *keys, int key_count,
 			 const char *filename) {
-	struct input_event event;
-	int partial_read = 0;
+	struct input_event *event;
+	char buf[4096]
+		__attribute__ ((aligned(__alignof__(*event))));
+	int n = 0;
 
-	while ((partial_read = read_safe(fd, &event, sizeof(event), partial_read))
-			== sizeof(event)) {
-		/* ignore non-keyboard events */
-		if (event.type != 1) {
-			if (debug > 2)
-				print_key(&event, filename, "non-keyboard event ignored");
-			continue;
+	while ((n = read_safe(fd, &buf, sizeof(buf))) > 0) {
+		if (n % sizeof(*event) != 0) {
+			fprintf(stderr,
+				"Read something that is not a multiple of event size (%d / %zd) !? Trying to reopen\n",
+				n, sizeof(*event));
+			return -1;
 		}
-
-		struct key *key = NULL;
-		for (int i = 0; i < key_count; i++) {
-			if (keys[i].code == event.code) {
-				key = &keys[i];
-				break;
-			}
+		for (event = (struct input_event*)buf;
+		     (char*)event + sizeof(event) <= buf + n;
+		     event++) {
+			handle_input_event(event, keys, key_count, filename);
 		}
-		/* ignore unconfigured key */
-		if (!key) {
-			if (debug > 1)
-				print_key(&event, filename, "ignored");
-			continue;
-		}
-		print_key(&event, filename, "processing");
-
-		handle_key(&event, key);
 	}
-	if (partial_read < 0) {
-		fprintf(stderr, "read error: %d\n", -partial_read);
-		exit(EXIT_FAILURE);
+	if (n < 0) {
+		fprintf(stderr, "read error: %d. Trying to reopen\n", -n);
+		return -1;
 	}
-	if (partial_read > 0) {
-		fprintf(stderr, "got a partial read from %s: %d. Aborting.\n",
-			filename, partial_read);
-		exit(EXIT_FAILURE);
-	}
+	return 0;
 }
 
 static struct action *add_short_action(struct key *key) {
@@ -465,22 +489,172 @@ static void *xreallocarray(void *ptr, size_t nmemb, size_t size) {
 	return ptr;
 }
 
+static void inotify_watch(struct input_file *input_file,
+			  struct pollfd *inotify) {
+	/* already setup - nothing to do! */
+	if (input_file->inotify_wd >= 0)
+		return;
+
+	/* setup inotify if not done yet */
+	if (!inotify->events) {
+		inotify->fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+		xassert(inotify->fd >= 0,
+			"Inotify init failed: %m");
+		inotify->events = POLLIN;
+	}
+
+	fprintf(stderr, "setting up inotify watch for %s\n",
+		input_file->filename);
+
+	/* add filename's parent directory.
+	 * We either have:
+	 * - a relative path without any dir,
+	 *   we have dirent == filename
+	 * - a full path or relative path with slashes,
+	 *   dirent will point just after last /
+	 */
+	char *watch_dir;
+	if (input_file->dirent == input_file->filename) {
+		watch_dir = ".";
+	} else {
+		watch_dir = input_file->filename;
+		xassert(input_file->dirent[-1] == '/',
+			"input path changed under us?");
+		input_file->dirent[-1] = 0;
+	}
+	input_file->inotify_wd =
+		inotify_add_watch(inotify->fd, watch_dir, IN_CREATE);
+	xassert(input_file->inotify_wd >= 0,
+		"Failed to add watch for %s: %m",
+		watch_dir);
+
+	/* restore / if required, we'll need it for open... */
+	if (input_file->dirent != input_file->filename) {
+		input_file->dirent[-1] = '/';
+	}
+}
+
+static void reopen_input(struct input_file *input_file,
+			struct pollfd *pollfd,
+			struct pollfd *inotify) {
+	if (pollfd->events) {
+		close(pollfd->fd);
+		pollfd->events = 0;
+	}
+	int fd = open(input_file->filename,
+		      O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+	if (fd < 0) {
+		fd = errno;
+		fprintf(stderr, "Open %s failed: %m\n", input_file->filename);
+		xassert(input_file->dirent,
+			"Inotify not enabled for this file: aborting");
+		xassert(fd == ENOENT,
+			"Cannot rely on inotify when error is not ENOENT: aborting");
+		inotify_watch(input_file, inotify);
+		return;
+	}
+	int clock = CLOCK_MONOTONIC;
+	/* we use a pipe for testing which won't understand this */
+	if (!test_mode && ioctl(fd, EVIOCSCLOCKID, &clock) != 0) {
+		close(fd);
+		fprintf(stderr,
+			"Could not request clock monotonic timestamps from %s. Ignoring this file.\n",
+			input_file->filename);
+		xassert(input_file->dirent,
+			"Inotify not enabled for this file: aborting");
+		inotify_watch(input_file, inotify);
+		return;
+	}
+
+	pollfd->fd = fd;
+	pollfd->events = POLLIN;
+}
+
+static void handle_inotify_event(struct inotify_event *event,
+				 struct input_file *input_files,
+				 struct pollfd *pollfds,
+				 int input_count) {
+	/* skip events we don't care about */
+	if (!(event->mask & IN_CREATE))
+		return;
+
+	for (int i = 0; i < input_count; i++) {
+		/* find inputs concerned */
+		if (event->wd != input_files[i].inotify_wd)
+			continue;
+		if (debug > 2) {
+			printf("got inotify event for %s's directory, %s\n",
+					input_files[i].filename, event->name);
+		}
+		/* is it filename we care about? */
+		if (strcmp(event->name, input_files[i].dirent))
+			continue;
+		if (debug) {
+			printf("reopening %s\n",
+					input_files[i].filename);
+		}
+		reopen_input(&input_files[i], &pollfds[i],
+				&pollfds[input_count]);
+	}
+
+}
+static void handle_inotify(struct input_file *input_files, struct pollfd *pollfds,
+			   int input_count) {
+	int fd = pollfds[input_count].fd;
+	struct inotify_event *event;
+	/* read more at a time. Align because man page example does... */
+	char buf[4096]
+		__attribute__ ((aligned(__alignof__(*event))));
+	int n = 0;
+
+	while ((n = read_safe(fd, &buf, sizeof(buf))) > 0) {
+		for (event = (struct inotify_event *)buf;
+		     (char*)event + sizeof(*event) <= buf + n;
+		     event = (struct inotify_event*)(((char*)event) + sizeof(*event) + event->len)) {
+			xassert((char*)event < buf + n + event->len,
+				"inotify event read has a weird size");
+
+			handle_inotify_event(event, input_files,
+					     pollfds, input_count);
+		}
+		xassert((char*)event == buf + n,
+			"libinput event we read had a weird size: %zd / %d",
+			((char*)event) - buf, n);
+	}
+	xassert(n >= 0, "Did not read expected amount from inotify fd: %d", n);
+}
+
 int main(int argc, char *argv[]) {
-	char const **event_inputs = NULL;
+	struct input_file *input_files = NULL;
 	struct key *keys = NULL;
 	struct action *cur_action = NULL;
+	int inotify_enabled = 0;
 	int input_count = 0;
 	int key_count = 0;
-	bool test_mode = false;
 
 	int c;
 	/* and real argument parsing now! */
-	while ((c = getopt_long(argc, argv, "i:s:l:a:t:vVh", long_options, NULL)) >= 0) {
+	while ((c = getopt_long(argc, argv, "I:i:s:l:a:t:vVh", long_options, NULL)) >= 0) {
 		switch (c) {
 		case 'i':
-			event_inputs = xreallocarray(event_inputs, input_count + 1,
-					             sizeof(*event_inputs));
-			event_inputs[input_count] = optarg;
+		case 'I':
+			input_files = xreallocarray(input_files, input_count + 1,
+					             sizeof(*input_files));
+			input_files[input_count].filename = optarg;
+			if (c == 'I') {
+				inotify_enabled = 1;
+				input_files[input_count].inotify_wd = -1;
+				input_files[input_count].dirent = strrchr(optarg, '/');
+				if (input_files[input_count].dirent) {
+					input_files[input_count].dirent++;
+				} else {
+					input_files[input_count].dirent = optarg;
+				}
+				xassert(input_files[input_count].dirent[0] != 0,
+					"Invalid filename %s", optarg);
+			} else {
+				input_files[input_count].dirent = NULL;
+			}
 			input_count++;
 			break;
 		case 's':
@@ -555,25 +729,17 @@ int main(int argc, char *argv[]) {
 		sort_actions(&keys[i]);
 	}
 
-	struct pollfd *pollfd = xcalloc(input_count, sizeof(*pollfd));
+	struct pollfd *pollfd = xcalloc(input_count + inotify_enabled,
+					sizeof(*pollfd));
 	for (int i = 0; i < input_count; i++) {
-		int fd = open(event_inputs[i], O_RDONLY|O_NONBLOCK);
-		xassert(fd >= 0,
-			"Open %s failed: %m", event_inputs[i]);
-		c = CLOCK_MONOTONIC;
-		/* we use a pipe for testing which won't understand this */
-		xassert(test_mode || ioctl(fd, EVIOCSCLOCKID, &c) == 0,
-			"Could not request clock monotonic timestamps from %s, aborting",
-			event_inputs[i]);
-
-		pollfd[i].fd = fd;
-		pollfd[i].events = POLLIN;
+		reopen_input(&input_files[i], &pollfd[i],
+				     &pollfd[input_count]);
 	}
 
 	while (1) {
 		int timeout = compute_timeout(keys, key_count);
-		int n = poll(pollfd, input_count, timeout);
-		if (n < 0 && errno == EINTR)
+		int n = poll(pollfd, input_count + inotify_enabled, timeout);
+		if (n < 0 && (errno == EINTR || errno == EAGAIN))
 			continue;
 		xassert(n >= 0, "Poll failure: %m");
 
@@ -586,10 +752,21 @@ int main(int argc, char *argv[]) {
 			if (!(pollfd[i].revents & POLLIN)) {
 				if (test_mode)
 					exit(0);
-				xassert(false, "got HUP/ERR on %s, aborting",
-					event_inputs[i]);
+				fprintf(stderr, "got HUP/ERR on %s. Trying to reopen.\n",
+					input_files[i].filename);
+				reopen_input(&input_files[i], &pollfd[i],
+					     &pollfd[input_count]);
 			}
-			handle_input(pollfd[i].fd, keys, key_count, event_inputs[i]);
+			if (handle_input(pollfd[i].fd, keys, key_count,
+					 input_files[i].filename)) {
+				reopen_input(&input_files[i], &pollfd[i],
+					     &pollfd[input_count]);
+			}
+		}
+		if (inotify_enabled && pollfd[input_count].revents) {
+			xassert(pollfd[input_count].revents & POLLIN,
+				"inotify fd went bad");
+			handle_inotify(input_files, pollfd, input_count);
 		}
 	}
 
