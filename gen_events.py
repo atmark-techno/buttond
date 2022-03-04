@@ -16,9 +16,14 @@ def main():
     # wait some for buttond init
     sleep(1)
     for command in sys.argv[1:]:
-        [key, state, time] = command.split(',')
-        gen_event(int(key), int(state))
-        sleep(int(time)/1000)
+        try:
+            [key, state, time] = command.split(',')
+            gen_event(int(key), int(state))
+            sleep(int(time)/1000)
+        except ValueError:
+            sys.stdout.buffer.write(command.encode('utf-8'))
+            sys.stdout.buffer.flush()
+            sleep(0.1)
     # ... and some more for debouncing
     sleep(1)
 

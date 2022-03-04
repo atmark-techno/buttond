@@ -60,8 +60,8 @@ run_pattern() {
 
 run_inotify() {
 	local testname="$1"
-	local pipe="$2"
-	shift 2
+	local pipe="$testname"
+	shift
 
 	# skip tests we didn't ask for
 	case ",$ONLY," in
@@ -214,9 +214,13 @@ run_pattern multiinput 148,1,100 148,0,0 -- \
 	-s 149 -a "touch multiinput_2"
 add_check multiinput e-multiinput_1 e-multiinput_2
 
-run_inotify inotify inotify 148,1,100 148,0,0 -- \
+run_inotify inotify 148,1,100 148,0,0 -- \
 	-s 148 -a "touch inotify_ok"
 add_check inotify e-inotify_ok
+
+run_inotify reopen 148,1,100 fdsf 148,0,0  -- \
+	-s 148 -a "touch reopen"
+add_check reopen e-reopen
 
 check_all
 
