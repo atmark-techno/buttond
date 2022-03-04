@@ -29,8 +29,8 @@ Find what key you want. Running with -vv will display ignored keys.
 Run buttond with -vv and press key you want to bind
 ```
 $ buttond -vv -i /dev/input/by-path/platform-gpio-keys-event
-[2467.960] 148 pressed: ignored
-[2468.040] 148 released: ignored
+[11340.668] PROG1 (148) pressed: ignored
+[11340.928] PROG1 (148) released: ignored
 ```
 
 ### Define actions/run service
@@ -40,8 +40,8 @@ pressed shortly, and poweroff if pressed longer than 10 seconds"
 (default for long key is 5s):
 ```
 $ buttond -i /dev/input/by-path/platform-gpio-keys-event \
-	-s 148 -a "rc-services foo restart" \
-	-l 148 -t 10000 -a "poweroff"
+	-s prog1 -a "rc-services foo restart" \
+	-l prog1 -t 10000 -a "poweroff"
 ```
 
 

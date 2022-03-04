@@ -64,12 +64,10 @@ void reopen_input(struct input_file *input_file,
 	int fd = open(input_file->filename,
 		      O_RDONLY | O_NONBLOCK | O_CLOEXEC);
 	if (fd < 0) {
-		fd = errno;
-		fprintf(stderr, "Open %s failed: %m\n", input_file->filename);
+		xassert(errno == ENOENT,
+			"Open %s failed: %m", input_file->filename);
 		xassert(input_file->dirent,
 			"Inotify not enabled for this file: aborting");
-		xassert(fd == ENOENT,
-			"Cannot rely on inotify when error is not ENOENT: aborting");
 		inotify_watch(input_file, inotify);
 		return;
 	}

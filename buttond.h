@@ -23,6 +23,7 @@ struct action {
 struct key {
 	/* key code */
 	uint16_t code;
+	const char *name;
 
 	/* whether ts_wakeup below is valid */
 	bool has_wakeup;

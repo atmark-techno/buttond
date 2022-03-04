@@ -156,11 +156,11 @@ check_all() {
 
 # tests take time to run by definition: run all in background then check.
 run_pattern shortkey 148,1,100 148,0,0 -- \
-	-s 148 -a "touch shortkey"
+	-s PROG1 -a "touch shortkey"
 add_check shortkey e-shortkey
 
 run_pattern shortkey_norun 148,1,1100 148,0,0 -- \
-	-s 148 -a "touch shortkey_norun"
+	-s prog1 -a "touch shortkey_norun"
 add_check shortkey_norun ne-shortkey_norun
 
 run_pattern short_twohits 148,1,100 148,0,100 148,1,100 148,0,0 -- \

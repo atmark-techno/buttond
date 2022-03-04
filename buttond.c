@@ -5,12 +5,14 @@
  */
 
 
+#include <ctype.h>
 #include <getopt.h>
 #include <linux/input.h>
 #include <poll.h>
 #include <string.h>
 
 #include "buttond.h"
+#include "keynames.h"
 
 /* debug:
  * -v (> 0/set): info message e.g. registered key presses
@@ -71,6 +73,10 @@ static void help(char *argv0) {
 }
 
 
+#define keyname_by_code(code) \
+	((code < sizeof(keynames) / sizeof(*keynames) \
+	 && keynames[code]) ? keynames[code] : "unknown")
+
 static void print_key(struct input_event *event, const char *filename,
 		      const char *message) {
 	if (debug < 1)
@@ -80,11 +86,12 @@ static void print_key(struct input_event *event, const char *filename,
 		/* extra info pertaining previous event: don't print */
 		return;
 	case 1:
-		printf("[%ld.%03ld] %s%s%d %s: %s\n",
+		printf("[%ld.%03ld] %s%s%s (%d) %s: %s\n",
 		       event->time.tv_sec, event->time.tv_usec / 1000,
 		       debug > 2 ? filename : "",
 		       debug > 2 ? " " : "",
-		       event->code, event->value ? "pressed" : "released",
+		       keyname_by_code(event->code), event->code,
+		       event->value ? "pressed" : "released",
 		       message);
 		break;
 	default:
@@ -322,6 +329,21 @@ static void sort_actions(struct key *key) {
 		sizeof(key->actions[0]), sort_actions_compare);
 }
 
+static uint16_t find_key_by_name(char *arg) {
+	/* XXX if this is too slow try to optimize later, but list is not so big */
+	for (int i = 0; arg[i]; i++) {
+		/* we require ASCII name anyway: make it uppercase to match header */
+		arg[i] = toupper(arg[i]);
+	}
+	for (size_t i = 0; i < sizeof(keynames) / sizeof(*keynames); i++) {
+		if (!keynames[i])
+			continue;
+		if (strcmp(keynames[i], arg) == 0) {
+			return i;
+		}
+	}
+	return 0;
+}
 
 int main(int argc, char *argv[]) {
 	struct input_file *input_files = NULL;
@@ -360,7 +382,11 @@ int main(int argc, char *argv[]) {
 		case 'l':
 			xassert(!cur_action || cur_action->action != NULL,
 				"Must set action before specifying next key!");
-			uint16_t code = strtou16(optarg);
+			/* try to find key by name first, then by code if it failed */
+			uint16_t code = find_key_by_name(optarg);
+			if (!code) {
+				code = strtou16(optarg);
+			}
 			struct key *cur_key = NULL;
 			for (int i = 0; i < key_count; i++) {
 				if (keys[i].code == code) {
@@ -374,7 +400,7 @@ int main(int argc, char *argv[]) {
 				cur_key = &keys[key_count];
 				key_count++;
 				memset(cur_key, 0, sizeof(*cur_key));
-				cur_key->code = strtou16(optarg);
+				cur_key->code = code;
 				cur_key->state = KEY_RELEASED;
 			}
 			cur_key->actions = xreallocarray(cur_key->actions,
