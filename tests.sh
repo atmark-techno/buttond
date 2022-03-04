@@ -27,6 +27,48 @@ run_pattern() {
 	*) return;;
 	esac
 
+	declare -a args=( )
+	declare -a inputs=( )
+	declare -a commands=( )
+	local command
+	while [[ $# -gt 0 ]]; do
+		if [[ "$1" = "--" ]]; then
+			shift
+			if [[ -z "$DRYRUN" ]]; then
+				exec {FD}< <("$GEN_EVENTS" "${args[@]}")
+				inputs+=( "-i" "/proc/self/fd/$FD" )
+			else
+				printf -v command "\"%s\" " "$GEN_EVENTS" "${args[@]}"
+				commands+=( "$command" )
+			fi
+			args=( )
+		fi
+		args+=( "$1" )
+		shift
+	done
+
+	if [[ -n "$DRYRUN" ]]; then
+		printf '"%s" ' "$BUTTOND" --test_mode
+		printf -- "-i <(%s) " "${commands[@]}"
+		printf '"%s" ' "${args[@]}"
+		echo
+		return
+	fi >&2
+	"$BUTTOND" --test_mode "${inputs[@]}" "${args[@]}" &
+	PROCESSES[$testname]=$!
+}
+
+run_inotify() {
+	local testname="$1"
+	local pipe="$2"
+	shift 2
+
+	# skip tests we didn't ask for
+	case ",$ONLY," in
+	",,"|*",$testname,"*) ;;
+	*) return;;
+	esac
+
 	declare -a keys=( )
 	while [[ $# -gt 0 ]]; do
 		if [[ "$1" = "--" ]]; then
@@ -38,13 +80,23 @@ run_pattern() {
 	done
 
 	if [[ -n "$DRYRUN" ]]; then
+		printf '"%s" ' "$BUTTOND" --test_mode -I "$pipe" "$@"
+		echo '&'
+		echo "sleep 1"
+		echo "mkfifo $pipe"
 		printf '"%s" ' "$GEN_EVENTS" "${keys[@]}"
-		printf "| "
-		printf '"%s" ' "$BUTTOND" --test_mode -i /dev/stdin "$@"
-		echo
+		echo "> $pipe"
+		echo 'wait $!'
 		return
 	fi >&2
-	"$GEN_EVENTS" "${keys[@]}" | "$BUTTOND" --test_mode -i /dev/stdin "$@" &
+	(
+		"$BUTTOND" --test_mode -I "$pipe" "$@" 2>/dev/null &
+		BPID=$!
+		sleep 1
+		mkfifo "$pipe"
+		"$GEN_EVENTS" "${keys[@]}" > "$pipe"
+		wait $BPID
+	) &
 	PROCESSES[$testname]=$!
 }
 
@@ -155,6 +207,16 @@ run_pattern shortlonglong_3 148,1,2200 -- \
 	-s 148 -a "touch shortlonglong_3_short" \
 	-l 148 -t 1000 -a "touch shortlonglong_3_long"
 add_check shortlonglong_3 ne-shortlonglong_3_short ne-shortlonglong_3_long e-shortlonglong_3_long2
+
+run_pattern multiinput 148,1,100 148,0,0 -- \
+	149,1,100 149,0,0 -- \
+	-s 148 -a "touch multiinput_1" \
+	-s 149 -a "touch multiinput_2"
+add_check multiinput e-multiinput_1 e-multiinput_2
+
+run_inotify inotify inotify 148,1,100 148,0,0 -- \
+	-s 148 -a "touch inotify_ok"
+add_check inotify e-inotify_ok
 
 check_all
 
