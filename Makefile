@@ -12,6 +12,9 @@ CFLAGS ?= -Wall -Wextra
 
 all: buttond
 
+keynames.h: gen_keynames_h.sh
+	./$^ > $@
+
 buttond.o: buttond.c buttond.h time_utils.h utils.h keynames.h
 input.o: input.c buttond.h time_utils.h utils.h
 buttond: buttond.o input.o
