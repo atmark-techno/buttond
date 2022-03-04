@@ -4,30 +4,13 @@
  * Copyright (c) 2021 Atmark Techno,Inc.
  */
 
-#define _POSIX_C_SOURCE 200809L
-#include <errno.h>
-#include <fcntl.h>
+
 #include <getopt.h>
-#include <inttypes.h>
-#include <limits.h>
 #include <linux/input.h>
 #include <poll.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
-#include <sys/inotify.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <time.h>
-#include <unistd.h>
 
-#define xassert(cond, fmt, args...) \
-	if (!(cond)) { \
-		fprintf(stderr, "ERROR: "fmt"\n", ##args); \
-		exit(EXIT_FAILURE); \
-	}
+#include "buttond.h"
 
 /* debug:
  * -v (> 0/set): info message e.g. registered key presses
@@ -35,68 +18,11 @@
  * -vvv (> 2): add non-keyboard events and file names
  * -vvvv (> 3): add timeout/wakeup related debugs
  */
-static int debug = 0;
-static int test_mode = 0;
+int debug = 0;
+int test_mode = 0;
 #define DEFAULT_LONG_PRESS_MSECS 5000
 #define DEFAULT_SHORT_PRESS_MSECS 1000
 #define DEBOUNCE_MSECS 10
-
-ssize_t read_safe(int fd, void *buf, ssize_t count) {
-	ssize_t total = 0;
-
-	while (total < count) {
-		ssize_t n;
-
-		n = read(fd, (char*)buf + total, count - total);
-		if (n < 0 && errno == EINTR)
-			continue;
-		else if (n < 0)
-			return errno == EAGAIN ? total : -errno;
-		else if (n == 0)
-			break;
-		total += n;
-	}
-	return total;
-}
-
-#define NSECS_IN_SEC  1000000000L
-#define NSECS_IN_MSEC 1000000L
-#define NSECS_IN_USEC 1000L
-#define USECS_IN_SEC  1000000L
-#define USECS_IN_MSEC 1000L
-
-/* time difference in msecs */
-static int64_t time_diff_ts(struct timespec *ts1, struct timespec *ts2) {
-	return (ts1->tv_nsec - ts2->tv_nsec) / NSECS_IN_MSEC
-		+ (ts1->tv_sec - ts2->tv_sec) * 1000;
-}
-
-static int64_t time_diff_tv(struct timeval *tv1, struct timeval *tv2) {
-	return (tv1->tv_usec - tv2->tv_usec) / USECS_IN_MSEC
-		+ (tv1->tv_sec - tv2->tv_sec) * 1000;
-}
-
-/* add number of msec to given timespec */
-static void time_add_ts(struct timespec *ts, int msec) {
-	ts->tv_nsec += msec * NSECS_IN_MSEC;
-	if (ts->tv_nsec >= NSECS_IN_SEC) {
-		ts->tv_sec += ts->tv_nsec / NSECS_IN_SEC;
-		ts->tv_nsec = ts->tv_nsec / NSECS_IN_SEC;
-	}
-}
-
-/* convert timeval to timespec and add offset msec */
-static void time_tv2ts(struct timespec *ts, struct timeval *base, int msec) {
-	ts->tv_nsec = base->tv_usec * NSECS_IN_USEC + msec * NSECS_IN_MSEC;
-	ts->tv_sec = base->tv_sec + ts->tv_nsec / NSECS_IN_SEC;
-	ts->tv_nsec %= NSECS_IN_SEC;
-}
-/* convert timespec to timeval and add offset msec */
-static void time_ts2tv(struct timeval *tv, struct timespec *base, int msec) {
-	tv->tv_usec = base->tv_nsec / NSECS_IN_USEC + msec * USECS_IN_MSEC;
-	tv->tv_sec = base->tv_sec + tv->tv_usec / USECS_IN_SEC;
-	tv->tv_usec %= USECS_IN_SEC;
-}
 
 #define OPT_TEST 257
 
@@ -144,82 +70,6 @@ static void help(char *argv0) {
 	       DEBOUNCE_MSECS);
 }
 
-struct action {
-	/* type of action (long/short press) */
-	enum type {
-		LONG_PRESS,
-		SHORT_PRESS,
-	} type;
-	/* cutoff time for action */
-	int trigger_time;
-	/* command to run */
-	char const *action;
-};
-
-struct key {
-	/* key code */
-	uint16_t code;
-
-	/* whether ts_wakeup below is valid */
-	bool has_wakeup;
-
-	/* key actions */
-	int action_count;
-	struct action *actions;
-
-	/* when key was pressed - valid for state == KEY_PRESSED or KEY_DEBOUNCE */
-	struct timeval tv_pressed;
-	/* valid when KEY_DEBOUNCE */
-	struct timeval tv_released;
-	/* when next to wakeup if has_wakeup is set */
-	struct timespec ts_wakeup;
-
-	/* state machine:
-	 * - RELEASED/PRESSED state
-	 * - DEBOUNCE: immediately after being released for DEBOUNCE_MSECS
-	 * - HANDLED: long press already handled (ignore until release)
-	 */
-	enum state {
-		KEY_RELEASED,
-		KEY_PRESSED,
-		KEY_DEBOUNCE,
-		KEY_HANDLED,
-	} state;
-};
-
-struct input_file {
-	/* first is full path, second is path in directory */
-	char *filename;
-	char *dirent;
-	int inotify_wd;
-};
-
-
-static uint16_t strtou16(const char *str) {
-	char *endptr;
-	long val;
-
-	val = strtol(str, &endptr, 0);
-	xassert(*endptr == 0,
-		"Argument %s must be a full integer", str);
-	xassert(val >= 0 && val <= 0xffff,
-		"Argument %s must be a 16 bit integer", str);
-	errno = 0;
-	return val;
-}
-
-static uint32_t strtoint(const char *str) {
-	char *endptr;
-	long val;
-
-	val = strtol(str, &endptr, 0);
-	xassert(*endptr == 0,
-		"Argument %s must be a full integer", str);
-	xassert(val >= INT_MIN && val <= INT_MAX,
-		"Argument %s must fit in a C int", str);
-	errno = 0;
-	return val;
-}
 
 static void print_key(struct input_event *event, const char *filename,
 		      const char *message) {
@@ -281,8 +131,7 @@ static void handle_key(struct input_event *event, struct key *key) {
 		key->state = KEY_DEBOUNCE;
 		key->tv_released = event->time;
 		key->has_wakeup = true;
-		xassert(clock_gettime(CLOCK_MONOTONIC, &key->ts_wakeup) == 0,
-			"Could not get time: %m");
+		time_gettime(&key->ts_wakeup);
 		time_add_ts(&key->ts_wakeup, DEBOUNCE_MSECS);
 		break;
 	case KEY_HANDLED:
@@ -297,9 +146,7 @@ static int compute_timeout(struct key *keys, int key_count) {
 	int i;
 	int timeout = -1;
 	struct timespec ts;
-
-	xassert(clock_gettime(CLOCK_MONOTONIC, &ts) == 0,
-		"Could not get time: %m");
+	time_gettime(&ts);
 
 	for (i = 0; i < key_count; i++) {
 		if (keys[i].has_wakeup) {
@@ -344,9 +191,7 @@ static struct action *find_key_action(struct key *key, int time) {
 static void handle_timeouts(struct key *keys, int key_count) {
 	int i;
 	struct timespec ts;
-
-	xassert(clock_gettime(CLOCK_MONOTONIC, &ts) == 0,
-		"Could not get time: %m");
+	time_gettime(&ts);
 
 	for (i = 0; i < key_count; i++) {
 		if (keys[i].has_wakeup
@@ -477,152 +322,6 @@ static void sort_actions(struct key *key) {
 		sizeof(key->actions[0]), sort_actions_compare);
 }
 
-static void *xcalloc(size_t nmemb, size_t size) {
-	void *ptr = calloc(nmemb, size);
-	xassert(ptr, "Allocation failure");
-	return ptr;
-}
-
-static void *xreallocarray(void *ptr, size_t nmemb, size_t size) {
-	ptr = realloc(ptr, nmemb * size);
-	xassert(ptr, "Allocation failure");
-	return ptr;
-}
-
-static void inotify_watch(struct input_file *input_file,
-			  struct pollfd *inotify) {
-	/* already setup - nothing to do! */
-	if (input_file->inotify_wd >= 0)
-		return;
-
-	/* setup inotify if not done yet */
-	if (!inotify->events) {
-		inotify->fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
-		xassert(inotify->fd >= 0,
-			"Inotify init failed: %m");
-		inotify->events = POLLIN;
-	}
-
-	fprintf(stderr, "setting up inotify watch for %s\n",
-		input_file->filename);
-
-	/* add filename's parent directory.
-	 * We either have:
-	 * - a relative path without any dir,
-	 *   we have dirent == filename
-	 * - a full path or relative path with slashes,
-	 *   dirent will point just after last /
-	 */
-	char *watch_dir;
-	if (input_file->dirent == input_file->filename) {
-		watch_dir = ".";
-	} else {
-		watch_dir = input_file->filename;
-		xassert(input_file->dirent[-1] == '/',
-			"input path changed under us?");
-		input_file->dirent[-1] = 0;
-	}
-	input_file->inotify_wd =
-		inotify_add_watch(inotify->fd, watch_dir, IN_CREATE);
-	xassert(input_file->inotify_wd >= 0,
-		"Failed to add watch for %s: %m",
-		watch_dir);
-
-	/* restore / if required, we'll need it for open... */
-	if (input_file->dirent != input_file->filename) {
-		input_file->dirent[-1] = '/';
-	}
-}
-
-static void reopen_input(struct input_file *input_file,
-			struct pollfd *pollfd,
-			struct pollfd *inotify) {
-	if (pollfd->events) {
-		close(pollfd->fd);
-		pollfd->events = 0;
-	}
-	int fd = open(input_file->filename,
-		      O_RDONLY | O_NONBLOCK | O_CLOEXEC);
-	if (fd < 0) {
-		fd = errno;
-		fprintf(stderr, "Open %s failed: %m\n", input_file->filename);
-		xassert(input_file->dirent,
-			"Inotify not enabled for this file: aborting");
-		xassert(fd == ENOENT,
-			"Cannot rely on inotify when error is not ENOENT: aborting");
-		inotify_watch(input_file, inotify);
-		return;
-	}
-	int clock = CLOCK_MONOTONIC;
-	/* we use a pipe for testing which won't understand this */
-	if (!test_mode && ioctl(fd, EVIOCSCLOCKID, &clock) != 0) {
-		close(fd);
-		fprintf(stderr,
-			"Could not request clock monotonic timestamps from %s. Ignoring this file.\n",
-			input_file->filename);
-		xassert(input_file->dirent,
-			"Inotify not enabled for this file: aborting");
-		inotify_watch(input_file, inotify);
-		return;
-	}
-
-	pollfd->fd = fd;
-	pollfd->events = POLLIN;
-}
-
-static void handle_inotify_event(struct inotify_event *event,
-				 struct input_file *input_files,
-				 struct pollfd *pollfds,
-				 int input_count) {
-	/* skip events we don't care about */
-	if (!(event->mask & IN_CREATE))
-		return;
-
-	for (int i = 0; i < input_count; i++) {
-		/* find inputs concerned */
-		if (event->wd != input_files[i].inotify_wd)
-			continue;
-		if (debug > 2) {
-			printf("got inotify event for %s's directory, %s\n",
-					input_files[i].filename, event->name);
-		}
-		/* is it filename we care about? */
-		if (strcmp(event->name, input_files[i].dirent))
-			continue;
-		if (debug) {
-			printf("reopening %s\n",
-					input_files[i].filename);
-		}
-		reopen_input(&input_files[i], &pollfds[i],
-				&pollfds[input_count]);
-	}
-
-}
-static void handle_inotify(struct input_file *input_files, struct pollfd *pollfds,
-			   int input_count) {
-	int fd = pollfds[input_count].fd;
-	struct inotify_event *event;
-	/* read more at a time. Align because man page example does... */
-	char buf[4096]
-		__attribute__ ((aligned(__alignof__(*event))));
-	int n = 0;
-
-	while ((n = read_safe(fd, &buf, sizeof(buf))) > 0) {
-		for (event = (struct inotify_event *)buf;
-		     (char*)event + sizeof(*event) <= buf + n;
-		     event = (struct inotify_event*)(((char*)event) + sizeof(*event) + event->len)) {
-			xassert((char*)event < buf + n + event->len,
-				"inotify event read has a weird size");
-
-			handle_inotify_event(event, input_files,
-					     pollfds, input_count);
-		}
-		xassert((char*)event == buf + n,
-			"libinput event we read had a weird size: %zd / %d",
-			((char*)event) - buf, n);
-	}
-	xassert(n >= 0, "Did not read expected amount from inotify fd: %d", n);
-}
 
 int main(int argc, char *argv[]) {
 	struct input_file *input_files = NULL;

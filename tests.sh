@@ -5,8 +5,10 @@
 TESTDIR=$(mktemp -d /tmp/buttond.XXXXXX)
 trap "rm -rf '$TESTDIR'" EXIT
 
-BUTTOND=$(realpath -e ./buttond)
-GEN_EVENTS=$(realpath -e ./gen_events.py)
+for d in . ..; do
+	[ -e "$BUTTOND" ] || BUTTOND=$(realpath "$d/buttond")
+	[ -e "$GEN_EVENTS" ] || GEN_EVENTS=$(realpath "$d/gen_events.py")
+done
 cd "$TESTDIR" || exit 1
 declare -A PROCESSES=( )
 declare -A CHECKS=( )
