@@ -72,10 +72,39 @@ static void help(char *argv0) {
 	       DEBOUNCE_MSECS);
 }
 
+static const char *keynames[KEY_MAX];
+
+static void init_keynames(void) {
+	size_t idx = 0;
+	/* starts at 1... */
+	for (int i = 1;
+	     i < KEY_MAX && idx < sizeof(allkeynames);
+	     i++, idx += strlen(&allkeynames[idx]) + 1) {
+		keynames[i] = &allkeynames[idx];
+	}
+}
+
+static uint16_t find_key_by_name(char *arg) {
+	/* XXX if this is too slow try to optimize later, but list is not so big */
+	for (int i = 0; arg[i]; i++) {
+		/* We require ASCII name anyway: make it uppercase to match header.
+		 * This doesn't bother pure digits for fallback. */
+		arg[i] = toupper(arg[i]);
+	}
+	for (size_t i = 0; i < KEY_MAX; i++) {
+		if (!keynames[i])
+			continue;
+		if (strcmp(keynames[i], arg) == 0) {
+			return i;
+		}
+	}
+	return 0;
+}
 
 #define keyname_by_code(code) \
-	((code < sizeof(keynames) / sizeof(*keynames) \
-	 && keynames[code]) ? keynames[code] : "unknown")
+	((code < KEY_MAX && keynames[code]) ? keynames[code] : "unknown")
+
+
 
 static void print_key(struct input_event *event, const char *filename,
 		      const char *message) {
@@ -329,22 +358,6 @@ static void sort_actions(struct key *key) {
 		sizeof(key->actions[0]), sort_actions_compare);
 }
 
-static uint16_t find_key_by_name(char *arg) {
-	/* XXX if this is too slow try to optimize later, but list is not so big */
-	for (int i = 0; arg[i]; i++) {
-		/* we require ASCII name anyway: make it uppercase to match header */
-		arg[i] = toupper(arg[i]);
-	}
-	for (size_t i = 0; i < sizeof(keynames) / sizeof(*keynames); i++) {
-		if (!keynames[i])
-			continue;
-		if (strcmp(keynames[i], arg) == 0) {
-			return i;
-		}
-	}
-	return 0;
-}
-
 int main(int argc, char *argv[]) {
 	struct input_file *input_files = NULL;
 	struct key *keys = NULL;
@@ -352,6 +365,8 @@ int main(int argc, char *argv[]) {
 	int inotify_enabled = 0;
 	int input_count = 0;
 	int key_count = 0;
+
+	init_keynames();
 
 	int c;
 	/* and real argument parsing now! */

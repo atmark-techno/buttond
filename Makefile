@@ -12,7 +12,7 @@ CFLAGS ?= -Wall -Wextra
 
 all: buttond
 
-buttond.o: buttond.c buttond.h time_utils.h utils.h
+buttond.o: buttond.c buttond.h time_utils.h utils.h keynames.h
 input.o: input.c buttond.h time_utils.h utils.h
 buttond: buttond.o input.o
 
