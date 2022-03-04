@@ -43,7 +43,7 @@ run_pattern() {
 		printf '"%s" ' "$BUTTOND" --test_mode -i /dev/stdin "$@"
 		echo
 		return
-	fi
+	fi >&2
 	"$GEN_EVENTS" "${keys[@]}" | "$BUTTOND" --test_mode -i /dev/stdin "$@" &
 	PROCESSES[$testname]=$!
 }
