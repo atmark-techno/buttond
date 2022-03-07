@@ -29,7 +29,7 @@ static inline void time_add_ts(struct timespec *ts, int msec) {
 	ts->tv_nsec += msec * NSECS_IN_MSEC;
 	if (ts->tv_nsec >= NSECS_IN_SEC) {
 		ts->tv_sec += ts->tv_nsec / NSECS_IN_SEC;
-		ts->tv_nsec = ts->tv_nsec / NSECS_IN_SEC;
+		ts->tv_nsec %= NSECS_IN_SEC;
 	}
 }
 
