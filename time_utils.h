@@ -35,14 +35,14 @@ static inline void time_add_ts(struct timespec *ts, int msec) {
 
 /* convert timeval to timespec and add offset msec */
 static inline void time_tv2ts(struct timespec *ts, struct timeval *base, int msec) {
-	ts->tv_nsec = base->tv_usec * NSECS_IN_USEC + msec * NSECS_IN_MSEC;
-	ts->tv_sec = base->tv_sec + ts->tv_nsec / NSECS_IN_SEC;
+	ts->tv_nsec = base->tv_usec * NSECS_IN_USEC + (msec % 1000) * NSECS_IN_MSEC;
+	ts->tv_sec = base->tv_sec + ts->tv_nsec / NSECS_IN_SEC + msec / 1000;
 	ts->tv_nsec %= NSECS_IN_SEC;
 }
 /* convert timespec to timeval and add offset msec */
 static inline void time_ts2tv(struct timeval *tv, struct timespec *base, int msec) {
-	tv->tv_usec = base->tv_nsec / NSECS_IN_USEC + msec * USECS_IN_MSEC;
-	tv->tv_sec = base->tv_sec + tv->tv_usec / USECS_IN_SEC;
+	tv->tv_usec = base->tv_nsec / NSECS_IN_USEC + (msec % 1000) * USECS_IN_MSEC;
+	tv->tv_sec = base->tv_sec + tv->tv_usec / USECS_IN_SEC + msec / 1000;
 	tv->tv_usec %= USECS_IN_SEC;
 }
 
