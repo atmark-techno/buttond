@@ -116,7 +116,7 @@ static void print_key(struct input_event *event, const char *filename,
 		return;
 	case 1:
 		printf("[%ld.%03ld] %s%s%s (%d) %s: %s\n",
-		       event->time.tv_sec, event->time.tv_usec / 1000,
+		       event->input_event_sec, event->input_event_usec / 1000,
 		       debug > 2 ? filename : "",
 		       debug > 2 ? " " : "",
 		       keyname_by_code(event->code), event->code,
@@ -125,12 +125,20 @@ static void print_key(struct input_event *event, const char *filename,
 		break;
 	default:
 		printf("[%ld.%03ld] %s%s%d %d %d: %s\n",
-		       event->time.tv_sec, event->time.tv_usec / 1000,
+		       event->input_event_sec, event->input_event_usec / 1000,
 		       debug > 2 ? filename : "",
 		       debug > 2 ? " " : "",
 		       event->type, event->code, event->value,
 		       message);
 	}
+}
+
+static void tv_from_event(struct timeval *tv, struct input_event *event) {
+	/* input_event has a timeval struct on 64bit systems,
+	 * but it is not guaranteed so copy manually
+	 */
+	tv->tv_sec = event->input_event_sec;
+	tv->tv_usec = event->input_event_usec;
 }
 
 static void handle_key(struct input_event *event, struct key *key) {
@@ -143,7 +151,7 @@ static void handle_key(struct input_event *event, struct key *key) {
 
 		/* don't reset timestamp/wakeup on debounce */
 		if (key->state == KEY_RELEASED) {
-			key->tv_pressed = event->time;
+			tv_from_event(&key->tv_pressed, event);
 		}
 		key->state = KEY_PRESSED;
 
@@ -165,7 +173,7 @@ static void handle_key(struct input_event *event, struct key *key) {
 			break;
 		/* mark key for debounce, we will handle event after timeout */
 		key->state = KEY_DEBOUNCE;
-		key->tv_released = event->time;
+		tv_from_event(&key->tv_released, event);
 		key->has_wakeup = true;
 		time_gettime(&key->ts_wakeup);
 		time_add_ts(&key->ts_wakeup, DEBOUNCE_MSECS);
