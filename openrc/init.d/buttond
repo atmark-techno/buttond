@@ -5,3 +5,5 @@ description="Run actions when buttons are pressed"
 
 command=/usr/bin/buttond
 command_args="$BUTTOND_ARGS"
+command_background=1
+pidfile=/run/buttond.pid
