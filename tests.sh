@@ -183,7 +183,7 @@ run_pattern long_twohits 148,1,1100 148,0,100 148,1,1100 148,0,0 -- \
 	-l 148 -t 1000 -a "echo long" > long_twohits
 add_check long_twohits l2-long_twohits
 
-run_pattern long_debounce 148,1,500 148,0,5 148,1,500 148,0,0 -- \
+run_pattern long_debounce 148,1,600 148,0,5 148,1,600 148,0,0 -- \
 	-l 148 -t 1000 -a "echo long" > long_debounce
 add_check long_debounce l1-long_debounce
 
