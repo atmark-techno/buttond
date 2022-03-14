@@ -258,8 +258,14 @@ static void handle_timeouts(struct key *keys, int key_count) {
 					printf("running %s after %"PRId64" ms\n",
 					       action->action, diff);
 				system(action->action);
+			} else if (keys[i].state != KEY_DEBOUNCE) {
+				fprintf(stderr,
+					"Woke up for key %s (%d) without any associated action, this shuld not happen!\n",
+					keyname_by_code(keys[i].code),
+					keys[i].code);
 			} else if (debug) {
-				printf("ignoring key %d released after %"PRId64" ms\n",
+				printf("ignoring key %s (%d) released after %"PRId64" ms\n",
+				       keyname_by_code(keys[i].code),
 				       keys[i].code, diff);
 			}
 
@@ -332,8 +338,8 @@ static struct action *add_short_action(struct key *key) {
 	/* can only have one short key */
 	for (int i = 0; i < key->action_count; i++) {
 		xassert(key->actions[i].type != SHORT_PRESS,
-			"duplicate short key for key %d, aborting.",
-			key->code);
+			"duplicate short key for key %s (%d), aborting.",
+			keyname_by_code(key->code), key->code);
 	}
 	struct action *action = &key->actions[key->action_count];
 	action->type = SHORT_PRESS;
