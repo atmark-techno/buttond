@@ -57,8 +57,9 @@ static void help(char *argv0) {
 	printf("  -V, --version: show version\n");
 	printf("  -v, --verbose: verbose (repeatable)\n\n");
 
-	printf("<key> code can be found in uapi/linux/input-event-code.h or by running\n");
-	printf("with -vv\n\n");
+	printf("<key> code should preferrably be a key name or its value, which can be found\n");
+	printf("in uapi/linux/input-event-code.h or by running with -vv\n");
+	printf("(note for single digits e.g. '1' the key name is used)\n\n");
 
 	printf("Semantics: a short press action happens on release, if and only if\n");
 	printf("the button was released before <time> (default %d) milliseconds.\n",
@@ -410,6 +411,10 @@ int main(int argc, char *argv[]) {
 			if (!code) {
 				code = strtou16(optarg);
 			}
+			xassert(code,
+				"key code (%s) should be a key name or its keycode",
+				optarg);
+
 			struct key *cur_key = NULL;
 			for (int i = 0; i < key_count; i++) {
 				if (keys[i].code == code) {
@@ -446,6 +451,9 @@ int main(int argc, char *argv[]) {
 			xassert(cur_action,
 				"Action timeout can only be set after setting key code");
 			cur_action->trigger_time = strtoint(optarg);
+			xassert(cur_action->trigger_time,
+				"Could not parse trigger time (%s): %m",
+				optarg);
 			break;
 		case 'v':
 			debug++;

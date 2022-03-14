@@ -51,23 +51,31 @@ static inline uint16_t strtou16(const char *str) {
 	long val;
 
 	val = strtol(str, &endptr, 0);
-	xassert(*endptr == 0,
-		"Argument %s must be a full integer", str);
-	xassert(val >= 0 && val <= 0xffff,
-		"Argument %s must be a 16 bit integer", str);
+	if (*endptr != 0) {
+		errno = EINVAL;
+		return 0;
+	}
+	if (val < 0 || val > 0xffff) {
+		errno = ERANGE;
+		return 0;
+	}
 	errno = 0;
 	return val;
 }
 
 static inline uint32_t strtoint(const char *str) {
 	char *endptr;
-	long val;
+	long long val;
 
-	val = strtol(str, &endptr, 0);
-	xassert(*endptr == 0,
-		"Argument %s must be a full integer", str);
-	xassert(val >= INT_MIN && val <= INT_MAX,
-		"Argument %s must fit in a C int", str);
+	val = strtoll(str, &endptr, 0);
+	if (*endptr != 0) {
+		errno = EINVAL;
+		return 0;
+	}
+	if (val < 0 || val > UINT_MAX) {
+		errno = ERANGE;
+		return 0;
+	}
 	errno = 0;
 	return val;
 }
