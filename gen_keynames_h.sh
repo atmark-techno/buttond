@@ -16,14 +16,14 @@ cat <<EOF
 
 
 EOF
-$AWK '/^#define KEY_/ { $3=$3+0; if ($3) { keys[$3]=gensub(/KEY_/, "", 1, $2); }}
+$AWK '/^#define KEY_/ { $3=$3+0; if ($3) { gsub(/KEY_/, "", $2); keys[$3] = $2; }}
 	END {
 		printf("const char allkeynames[] =\n  \"");
 		max = 0;
 		for (key in keys) {
 			key=key+0; # cast to int
 			# 0x2ff is KEY_MAX, optimize for hole before it
-			if (key > max && key < 0x2ff) {
+			if (key > max && key < '"$((0x2ff))"') {
 				max = key;
 			}
 		}
