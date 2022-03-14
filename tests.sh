@@ -210,6 +210,19 @@ run_pattern shortlonglong_3 148,1,2200 -- \
 	-l 148 -t 1000 -a "touch shortlonglong_3_long"
 add_check shortlonglong_3 ne-shortlonglong_3_short ne-shortlonglong_3_long e-shortlonglong_3_long2
 
+run_pattern multikey_short 148,1,10 149,1,100 148,0,10 149,0,0 -- \
+	-s 148 -a 'touch multikey_short_1' \
+	-s 149 -a 'touch multikey_short_2'
+add_check multikey_short e-multikey_short_1 e-multikey_short_2
+
+run_pattern multikey_shortlong 148,1,10 149,1,100 149,0,2500 -- \
+	-s 148 -a 'touch multikey_shortlong_1' \
+	-l 148 -t 2000 -a 'touch multikey_shortlong_2' \
+	-s 149 -a 'touch multikey_shortlong_3' \
+	-l 149 -t 2000 -a 'touch multikey_shortlong_4'
+add_check multikey_shortlong ne-multikey_shortlong_1 e-multikey_shortlong_2 \
+	e-multikey_shortlong_3 ne-multikey_shortlong_4
+
 run_pattern multiinput 148,1,100 148,0,0 -- \
 	149,1,100 149,0,0 -- \
 	-s 148 -a "touch multiinput_1" \
