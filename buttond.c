@@ -29,6 +29,7 @@ int test_mode = 0;
 #define OPT_TEST 257
 
 static struct option long_options[] = {
+	{"inotify",	required_argument,	0, 'i' },
 	{"short",	required_argument,	0, 's' },
 	{"long",	required_argument,	0, 'l' },
 	{"action",	required_argument,	0, 'a' },
@@ -49,7 +50,7 @@ static void help(char *argv0) {
 	printf("Options:\n");
 	printf("  [files]: file(s) to get event from e.g. /dev/input/event2\n");
 	printf("           pass as many as needed to monitor multiple files\n");
-	printf("  -I <file>: same as non-option files, except if they disappear wait for them to come back\n");
+	printf("  -i <file>: same as non-option files, except if they disappear wait for them to come back\n");
 	printf("  -s/--short <key>  [-t/--time <time ms>] -a/--action <command>: action on short key press\n");
 	printf("  -l/--long <key> [-t/--time <time ms>] -a/--action <command>: action on long key press\n");
 	printf("  -h, --help: show this help\n");
@@ -407,9 +408,9 @@ int main(int argc, char *argv[]) {
 	init_keynames();
 
 	int c;
-	while ((c = getopt_long(argc, argv, "I:s:l:a:t:vVh", long_options, NULL)) >= 0) {
+	while ((c = getopt_long(argc, argv, "i:s:l:a:t:vVh", long_options, NULL)) >= 0) {
 		switch (c) {
-		case 'I':
+		case 'i':
 			add_input(optarg, &input_files, &input_count, true);
 			inotify_enabled = true;
 			break;

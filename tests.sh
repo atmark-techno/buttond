@@ -82,7 +82,7 @@ run_inotify() {
 	done
 
 	if [[ -n "$DRYRUN" ]]; then
-		printf '"%s" ' "$BUTTOND" --test_mode -I "$pipe" "$@"
+		printf '"%s" ' "$BUTTOND" --test_mode -i "$pipe" "$@"
 		echo '&'
 		echo "sleep 1"
 		echo "mkfifo $pipe"
@@ -92,7 +92,7 @@ run_inotify() {
 		return
 	fi >&2
 	(
-		"$BUTTOND" --test_mode -I "$pipe" "$@" 2>/dev/null &
+		"$BUTTOND" --test_mode -i "$pipe" "$@" 2>/dev/null &
 		BPID=$!
 		sleep 1
 		mkfifo "$pipe"

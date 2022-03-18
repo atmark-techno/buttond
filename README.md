@@ -73,4 +73,4 @@ not trigger anything, and keep counting time from initial key press.
 Actions "on release" actually happen 10ms after release.
 
  - For devices that might disappear (e.g. usb keyboard), it's possible
-to use `-I <file>` to use inotify to wait for it to come back
+to use `-i <file>` to use inotify to wait for it to come back
