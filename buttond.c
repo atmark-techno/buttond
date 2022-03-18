@@ -24,9 +24,10 @@ int debug = 0;
 int test_mode = 0;
 #define DEFAULT_LONG_PRESS_MSECS 5000
 #define DEFAULT_SHORT_PRESS_MSECS 1000
-#define DEBOUNCE_MSECS 10
+int debounce_msecs = 10;
 
 #define OPT_TEST 257
+#define OPT_DEBOUNCE_TIME 258
 
 static struct option long_options[] = {
 	{"inotify",	required_argument,	0, 'i' },
@@ -38,6 +39,7 @@ static struct option long_options[] = {
 	{"version",	no_argument,		0, 'V' },
 	{"help",	no_argument,		0, 'h' },
 	{"test_mode",	no_argument,		0, OPT_TEST },
+	{"debounce-time", required_argument,	0, OPT_DEBOUNCE_TIME },
 	{0,		0,			0,  0  }
 };
 
@@ -70,7 +72,7 @@ static void help(char *argv0) {
 
 	printf("Note some keyboards have repeat built in firmware so quick repetitions\n");
 	printf("(<%dms) are handled as if key were pressed continuously\n",
-	       DEBOUNCE_MSECS);
+	       debounce_msecs);
 }
 
 static const char *keynames[KEY_MAX];
@@ -177,7 +179,7 @@ static void handle_key(struct input_event *event, struct key *key) {
 		tv_from_event(&key->tv_released, event);
 		key->has_wakeup = true;
 		time_gettime(&key->ts_wakeup);
-		time_add_ts(&key->ts_wakeup, DEBOUNCE_MSECS);
+		time_add_ts(&key->ts_wakeup, debounce_msecs);
 		break;
 	case KEY_HANDLED:
 		/* ignore until key down */
@@ -478,6 +480,9 @@ int main(int argc, char *argv[]) {
 			exit(EXIT_SUCCESS);
 		case OPT_TEST:
 			test_mode = true;
+			break;
+		case OPT_DEBOUNCE_TIME:
+			debounce_msecs = strtoint(optarg);
 			break;
 		default:
 			help(argv[0]);

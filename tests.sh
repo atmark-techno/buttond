@@ -164,11 +164,13 @@ run_pattern shortkey_norun 148,1,1100 148,0,0 -- \
 add_check shortkey_norun ne-shortkey_norun
 
 run_pattern short_twohits 148,1,100 148,0,100 148,1,100 148,0,0 -- \
-	-s 148 -a "echo short" > short_twohits
+	-s 148 -a "echo short" \
+	--debounce-time 0 > short_twohits
 add_check short_twohits l2-short_twohits
 
 run_pattern short_debounce 148,1,100 148,0,5 148,1,100 148,0,0 -- \
-	-s 148 -a "echo short" > short_debounce
+	-s 148 -a "echo short" \
+	--debounce-time 50 > short_debounce
 add_check short_debounce l1-short_debounce
 
 run_pattern longkey 148,1,2200 -- \
@@ -184,7 +186,8 @@ run_pattern long_twohits 148,1,1100 148,0,100 148,1,1100 148,0,0 -- \
 add_check long_twohits l2-long_twohits
 
 run_pattern long_debounce 148,1,600 148,0,5 148,1,600 148,0,0 -- \
-	-l 148 -t 1000 -a "echo long" > long_debounce
+	-l 148 -t 1000 -a "echo long" \
+	--debounce-time 50 > long_debounce
 add_check long_debounce l1-long_debounce
 
 run_pattern shortlong 148,1,100 148,0,100 148,1,2200 -- \
