@@ -38,7 +38,7 @@ run_pattern() {
 			shift
 			if [[ -z "$DRYRUN" ]]; then
 				exec {FD}< <("$GEN_EVENTS" "${args[@]}")
-				inputs+=( "-i" "/proc/self/fd/$FD" )
+				inputs+=( "/proc/self/fd/$FD" )
 			else
 				printf -v command "\"%s\" " "$GEN_EVENTS" "${args[@]}"
 				commands+=( "$command" )
@@ -51,7 +51,7 @@ run_pattern() {
 
 	if [[ -n "$DRYRUN" ]]; then
 		printf '"%s" ' "$BUTTOND" --test_mode
-		printf -- "-i <(%s) " "${commands[@]}"
+		printf -- "<(%s) " "${commands[@]}"
 		printf '"%s" ' "${args[@]}"
 		echo
 		return

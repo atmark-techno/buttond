@@ -1,5 +1,5 @@
 # arguments in BUTTOND_ARGS are passed as is to buttond
 
-BUTTOND_ARGS="-i /dev/input/by-path/platform-gpio-keys-event"
+BUTTOND_ARGS="/dev/input/by-path/platform-gpio-keys-event"
 BUTTOND_ARGS="$BUTTOND_ARGS -l power -t 3000 -a poweroff"
 BUTTOND_ARGS="$BUTTOND_ARGS -l restart -t 3000 -a reboot"

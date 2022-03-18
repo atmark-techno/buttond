@@ -29,7 +29,6 @@ int test_mode = 0;
 #define OPT_TEST 257
 
 static struct option long_options[] = {
-	{"input",	required_argument,	0, 'i' },
 	{"short",	required_argument,	0, 's' },
 	{"long",	required_argument,	0, 'l' },
 	{"action",	required_argument,	0, 'a' },
@@ -46,11 +45,11 @@ static void version(char *argv0) {
 }
 
 static void help(char *argv0) {
-	printf("Usage: %s [options]\n", argv0);
+	printf("Usage: %s [options] [files]\n", argv0);
 	printf("Options:\n");
-	printf("  -i, --input <file>: file to get event from e.g. /dev/input/event2\n");
-	printf("                      pass multiple times to monitor multiple files\n");
-	printf("  -I <file>: same as -i, except if file disappears wait for it to come back\n");
+	printf("  [files]: file(s) to get event from e.g. /dev/input/event2\n");
+	printf("           pass as many as needed to monitor multiple files\n");
+	printf("  -I <file>: same as non-option files, except if they disappear wait for them to come back\n");
 	printf("  -s/--short <key>  [-t/--time <time ms>] -a/--action <command>: action on short key press\n");
 	printf("  -l/--long <key> [-t/--time <time ms>] -a/--action <command>: action on long key press\n");
 	printf("  -h, --help: show this help\n");
@@ -373,40 +372,46 @@ static void sort_actions(struct key *key) {
 		sizeof(key->actions[0]), sort_actions_compare);
 }
 
+static void add_input(char *path, struct input_file **p_input_files,
+		      int *p_input_count, bool inotify) {
+	int input_count = *p_input_count;
+	struct input_file *input_files = *p_input_files;
+	input_files = xreallocarray(input_files, input_count + 1,
+			sizeof(*input_files));
+	input_files[input_count].filename = path;
+	if (inotify) {
+		input_files[input_count].inotify_wd = -1;
+		input_files[input_count].dirent = strrchr(path, '/');
+		if (input_files[input_count].dirent) {
+			input_files[input_count].dirent++;
+		} else {
+			input_files[input_count].dirent = path;
+		}
+		xassert(input_files[input_count].dirent[0] != 0,
+				"Invalid filename %s", path);
+	} else {
+		input_files[input_count].dirent = NULL;
+	}
+	*p_input_count = input_count + 1;
+	*p_input_files = input_files;
+}
+
 int main(int argc, char *argv[]) {
 	struct input_file *input_files = NULL;
 	struct key *keys = NULL;
 	struct action *cur_action = NULL;
-	int inotify_enabled = 0;
+	bool inotify_enabled = false;
 	int input_count = 0;
 	int key_count = 0;
 
 	init_keynames();
 
 	int c;
-	/* and real argument parsing now! */
-	while ((c = getopt_long(argc, argv, "I:i:s:l:a:t:vVh", long_options, NULL)) >= 0) {
+	while ((c = getopt_long(argc, argv, "I:s:l:a:t:vVh", long_options, NULL)) >= 0) {
 		switch (c) {
-		case 'i':
 		case 'I':
-			input_files = xreallocarray(input_files, input_count + 1,
-					             sizeof(*input_files));
-			input_files[input_count].filename = optarg;
-			if (c == 'I') {
-				inotify_enabled = 1;
-				input_files[input_count].inotify_wd = -1;
-				input_files[input_count].dirent = strrchr(optarg, '/');
-				if (input_files[input_count].dirent) {
-					input_files[input_count].dirent++;
-				} else {
-					input_files[input_count].dirent = optarg;
-				}
-				xassert(input_files[input_count].dirent[0] != 0,
-					"Invalid filename %s", optarg);
-			} else {
-				input_files[input_count].dirent = NULL;
-			}
-			input_count++;
+			add_input(optarg, &input_files, &input_count, true);
+			inotify_enabled = true;
 			break;
 		case 's':
 		case 'l':
@@ -478,9 +483,9 @@ int main(int argc, char *argv[]) {
 			exit(EXIT_FAILURE);
 		}
 	}
-	xassert(optind >= argc,
-		"Non-option argument: %s. Did you forget to quote action?",
-		optind >= 0 ? argv[optind] : "???");
+	for (int i = optind; i < argc; i++) {
+		add_input(argv[i], &input_files, &input_count, false);
+	}
 	xassert(input_count > 0,
 		"No input have been given, exiting");
 	xassert(key_count > 0 || debug > 1,

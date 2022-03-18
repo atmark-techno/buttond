@@ -20,7 +20,7 @@ lrwxrwxrwx 1 root root 9 Mar  3 10:09 /dev/input/by-path/platform-gpio-keys-even
 If you do not recognize any name here just try them all
 (three -v will print filenames associated to each event):
 ```
-$ buttond -vvv $(printf -- "-i %s " /dev/input/event*)
+$ buttond -vvv /dev/input/event*
 ```
 
 ### Identify key
@@ -28,7 +28,7 @@ $ buttond -vvv $(printf -- "-i %s " /dev/input/event*)
 Find what key you want. Running with -vv will display ignored keys.  
 Run buttond with -vv and press key you want to bind
 ```
-$ buttond -vv -i /dev/input/by-path/platform-gpio-keys-event
+$ buttond -vv /dev/input/by-path/platform-gpio-keys-event
 [11340.668] PROG1 (148) pressed: ignored
 [11340.928] PROG1 (148) released: ignored
 ```
@@ -39,7 +39,7 @@ Device what you want to do and do it: e.g. "restart service foo if key
 pressed shortly, and poweroff if pressed longer than 10 seconds"
 (default for long key is 5s):
 ```
-$ buttond -i /dev/input/by-path/platform-gpio-keys-event \
+$ buttond /dev/input/by-path/platform-gpio-keys-event \
 	-s prog1 -a "rc-services foo restart" \
 	-l prog1 -t 10000 -a "poweroff"
 ```
@@ -73,4 +73,4 @@ not trigger anything, and keep counting time from initial key press.
 Actions "on release" actually happen 10ms after release.
 
  - For devices that might disappear (e.g. usb keyboard), it's possible
-to use -I instead of -i to use inotify to wait for it to come back
+to use `-I <file>` to use inotify to wait for it to come back
