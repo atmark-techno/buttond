@@ -67,7 +67,8 @@ void reopen_input(struct input_file *input_file,
 		xassert(errno == ENOENT,
 			"Open %s failed: %m", input_file->filename);
 		xassert(input_file->dirent,
-			"Inotify not enabled for this file: aborting");
+			"%s: %m.\nInotify is not enabled, aborting.",
+			input_file->filename);
 		inotify_watch(input_file, inotify);
 		return;
 	}
