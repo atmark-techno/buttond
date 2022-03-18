@@ -78,9 +78,11 @@ void reopen_input(struct input_file *input_file,
 		fprintf(stderr,
 			"Could not request clock monotonic timestamps from %s. Ignoring this file.\n",
 			input_file->filename);
-		xassert(input_file->dirent,
-			"Inotify not enabled for this file: aborting");
-		inotify_watch(input_file, inotify);
+		if (input_file->dirent)
+			inotify_watch(input_file, inotify);
+		else if (debug < 2)
+			xassert(input_file->dirent,
+				"Inotify not enabled for this file: aborting");
 		return;
 	}
 
