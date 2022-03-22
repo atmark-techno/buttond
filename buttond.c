@@ -505,6 +505,7 @@ int main(int argc, char *argv[]) {
 	struct pollfd *pollfd = xcalloc(input_count + inotify_enabled,
 					sizeof(*pollfd));
 	for (int i = 0; i < input_count; i++) {
+		pollfd[i].fd = -1;
 		reopen_input(&input_files[i], &pollfd[i],
 				     &pollfd[input_count]);
 	}

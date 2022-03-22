@@ -57,8 +57,9 @@ static void inotify_watch(struct input_file *input_file,
 void reopen_input(struct input_file *input_file,
 		  struct pollfd *pollfd,
 		  struct pollfd *inotify) {
-	if (pollfd->events) {
+	if (pollfd->fd >= 0) {
 		close(pollfd->fd);
+		pollfd->fd = -1;
 		pollfd->events = 0;
 	}
 	int fd = open(input_file->filename,
