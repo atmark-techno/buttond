@@ -5,9 +5,42 @@
 #include <poll.h>
 #include <string.h>
 #include <sys/inotify.h>
+#include <sys/stat.h>
 
 #include "buttond.h"
 
+static void mkdir_one(char *path, char *rest) {
+	if (access(path, F_OK) == 0) {
+		return;
+	}
+	xassert(mkdir(path, 0777) == 0,
+		"Could not create %s required for %s/%s watch: %m",
+		path, path, rest);
+}
+
+static void mkdir_p(char *path) {
+	char *slash = path;
+	/* note: if path is non-canonical we also try to create subcomponents
+	 * that aren't strictly needed, but it's non-trivial to canonicalize
+	 * a path which does not exist without guessing (logical vs. physical
+	 * parent directory) so just go with it
+	 */
+	while ((slash = strchr(slash+1, '/'))) {
+		slash[0] = 0;
+		mkdir_one(path, slash+1);
+		slash[0]='/';
+	}
+	mkdir_one(path, "");
+}
+
+static void touch(char *dir, char *file) {
+	char buf[PATH_MAX];
+	xassert(snprintf(buf, PATH_MAX, "%s/%s", dir, file) < PATH_MAX,
+		"path too long: %s/%s", dir, file);
+	int fd = open(buf, O_CREAT, 0666);
+	xassert(fd >= 0, "Could not open %s: %m", buf);
+	xassert(close(fd) == 0, "Could not close newly-opened fd (%s): %m", buf);
+}
 
 static void inotify_watch(struct input_file *input_file,
 			  struct pollfd *inotify) {
@@ -42,8 +75,20 @@ static void inotify_watch(struct input_file *input_file,
 			"input path changed under us?");
 		input_file->dirent[-1] = 0;
 	}
+	bool retried = false;
+again:
 	input_file->inotify_wd =
 		inotify_add_watch(inotify->fd, watch_dir, IN_CREATE);
+	if (input_file->inotify_wd < 0 && errno == ENOENT && !retried) {
+		/* directory didn't exist, try to create it and create a dummy file in there
+		 * so udev doesn't delete it under us.
+		 * XXX: if this fails, add a timerfd and retry to open periodically like tail -F ?
+		 */
+		mkdir_p(watch_dir);
+		touch(watch_dir, ".buttond_watching");
+		retried = true;
+		goto again;
+	}
 	xassert(input_file->inotify_wd >= 0,
 		"Failed to add watch for %s: %m",
 		watch_dir);

@@ -278,6 +278,10 @@ run_inotify reopen 148,1,100 fdsf 148,0,0  -- \
 	-s 148 -a "touch reopen"
 add_check reopen e-reopen
 
+run_inotify subdir/mkdir 148,1,100 fdsf 148,0,0  -- \
+	-s 148 -a "touch inotify_mkdir"
+add_check subdir/mkdir e-inotify_mkdir
+
 check_fail sametime_short /dev/null \
 	-s 148 -t 1000 -a "echo 1" \
 	-s 148 -t 1000 -a "echo 1"
