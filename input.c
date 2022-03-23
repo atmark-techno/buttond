@@ -163,19 +163,22 @@ static void handle_inotify_event(struct inotify_event *event,
 		if (event->wd != input_files[i].inotify_wd)
 			continue;
 		if (debug > 2) {
-			printf("got inotify event for %s's directory, %s: %x\n",
+			printf("got inotify event for %s's directory (%s): %x\n",
 			       input_files[i].filename, event->name, event->mask);
 		}
 		if ((event->mask & IN_DELETE_SELF)) {
 			input_files[i].inotify_wd = -1;
 			inotify_watch(&input_files[i],
 				      &pollfds[input_count]);
-		}
-		/* is it filename we care about? */
-		if (strcmp(event->name, input_files[i].dirent))
+			/* we might have been raced there with yet another
+			 * re-creation, so also try to reopen even if it likely
+			 * won't work: continue here */
+		} else if (strcmp(event->name, input_files[i].dirent))
+			/* was it a filename we care about? */
 			continue;
+
 		if (debug) {
-			printf("reopening %s\n",
+			printf("trying to reopen %s\n",
 					input_files[i].filename);
 		}
 		reopen_input(&input_files[i], &pollfds[i],
