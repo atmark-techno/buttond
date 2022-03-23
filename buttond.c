@@ -4,12 +4,12 @@
  * Copyright (c) 2021 Atmark Techno,Inc.
  */
 
-
 #include <ctype.h>
 #include <getopt.h>
 #include <linux/input.h>
 #include <poll.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include "buttond.h"
 #include "keynames.h"
@@ -382,6 +382,22 @@ static void add_input(char *path, struct input_file **p_input_files,
 		      int *p_input_count, bool inotify) {
 	int input_count = *p_input_count;
 	struct input_file *input_files = *p_input_files;
+
+	/* skip directories */
+	struct stat sb;
+	if (stat(path, &sb) == 0) {
+		if ((sb.st_mode & S_IFMT) == S_IFDIR) {
+			fprintf(stderr, "Skipping directory %s\n", path);
+			return;
+		}
+	} else {
+		xassert(errno == ENOENT,
+			"Could not stat %s: %m", path);
+		xassert(inotify,
+			"File %s does not exist and we are not in inotify mode",
+			path);
+	}
+
 	input_files = xreallocarray(input_files, input_count + 1,
 			sizeof(*input_files));
 	input_files[input_count].filename = path;

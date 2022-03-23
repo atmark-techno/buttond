@@ -12,7 +12,7 @@ project(
 
 cc = meson.get_compiler('c')
 add_project_arguments(cc.get_supported_arguments([
-  '-D_POSIX_C_SOURCE=200809L',
+  '-D_GNU_SOURCE'
 ]), language: 'c')
 
 executable(
