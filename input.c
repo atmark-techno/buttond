@@ -42,11 +42,12 @@ static void touch(char *dir, char *file) {
 	xassert(close(fd) == 0, "Could not close newly-opened fd (%s): %m", buf);
 }
 
-static void inotify_watch(struct input_file *input_file,
+/* return 1 if something was done */
+static int inotify_watch(struct input_file *input_file,
 			  struct pollfd *inotify) {
 	/* already setup - nothing to do! */
 	if (input_file->inotify_wd >= 0)
-		return;
+		return 0;
 
 	/* setup inotify if not done yet */
 	if (!inotify->events) {
@@ -97,6 +98,8 @@ again:
 	if (input_file->dirent != input_file->filename) {
 		input_file->dirent[-1] = '/';
 	}
+
+	return 1;
 }
 
 void reopen_input(struct input_file *input_file,
@@ -115,8 +118,13 @@ void reopen_input(struct input_file *input_file,
 		xassert(input_file->dirent,
 			"%s: %m.\nInotify is not enabled, aborting.",
 			input_file->filename);
-		inotify_watch(input_file, inotify);
-		return;
+		if (inotify_watch(input_file, inotify) == 0)
+			return;
+		/* this was racy: retry to open here, just in case. */
+		fd = open(input_file->filename,
+			  O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+		if (fd < 0)
+			return;
 	}
 	int clock = CLOCK_MONOTONIC;
 	/* we use a pipe for testing which won't understand this */
