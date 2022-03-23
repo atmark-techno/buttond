@@ -9,6 +9,11 @@
 
 #include "buttond.h"
 
+// XXX we probably also ought to watch IN_MOVE_TO (with create)
+// and IN_MOVE_SELF (with delete self), but this seems to be enough
+// for simple cases
+#define INOTIFY_WATCH_FLAGS (IN_CREATE|IN_DELETE_SELF)
+
 static void mkdir_one(char *path, char *rest) {
 	if (access(path, F_OK) == 0) {
 		return;
@@ -79,7 +84,7 @@ static int inotify_watch(struct input_file *input_file,
 	bool retried = false;
 again:
 	input_file->inotify_wd =
-		inotify_add_watch(inotify->fd, watch_dir, IN_CREATE);
+		inotify_add_watch(inotify->fd, watch_dir, INOTIFY_WATCH_FLAGS);
 	if (input_file->inotify_wd < 0 && errno == ENOENT && !retried) {
 		/* directory didn't exist, try to create it and create a dummy file in there
 		 * so udev doesn't delete it under us.
@@ -150,7 +155,7 @@ static void handle_inotify_event(struct inotify_event *event,
 				 struct pollfd *pollfds,
 				 int input_count) {
 	/* skip events we don't care about */
-	if (!(event->mask & IN_CREATE))
+	if (!(event->mask & INOTIFY_WATCH_FLAGS))
 		return;
 
 	for (int i = 0; i < input_count; i++) {
@@ -158,8 +163,13 @@ static void handle_inotify_event(struct inotify_event *event,
 		if (event->wd != input_files[i].inotify_wd)
 			continue;
 		if (debug > 2) {
-			printf("got inotify event for %s's directory, %s\n",
-					input_files[i].filename, event->name);
+			printf("got inotify event for %s's directory, %s: %x\n",
+			       input_files[i].filename, event->name, event->mask);
+		}
+		if ((event->mask & IN_DELETE_SELF)) {
+			input_files[i].inotify_wd = -1;
+			inotify_watch(&input_files[i],
+				      &pollfds[input_count]);
 		}
 		/* is it filename we care about? */
 		if (strcmp(event->name, input_files[i].dirent))
