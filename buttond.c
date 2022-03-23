@@ -500,6 +500,13 @@ int main(int argc, char *argv[]) {
 		"Last key press was defined without action");
 	for (int i = 0; i < key_count; i++) {
 		sort_actions(&keys[i]);
+		for (int j = 1; j < keys[i].action_count; j++) {
+			xassert(keys[i].actions[j-1].type == SHORT_PRESS
+					|| keys[i].actions[j-1].trigger_time != keys[i].actions[j].trigger_time,
+				"Key %s was defined twice with %d ms action",
+				keyname_by_code(keys[i].code),
+				keys[i].actions[j].trigger_time)
+		}
 	}
 
 	struct pollfd *pollfd = xcalloc(input_count + inotify_enabled,
