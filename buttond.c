@@ -227,8 +227,17 @@ static bool action_match(struct action *action, int time) {
 }
 
 static struct action *find_key_action(struct key *key, int time) {
-	/* check from the end to get the best match */
+	/* check short keys in growing order, then long keys in
+	 * decreasing order to get the best match */
+	for (int i = 0; i < key->action_count; i++) {
+		if (key->actions[i].type != SHORT_PRESS)
+			break;
+		if (action_match(&key->actions[i], time))
+			return &key->actions[i];
+	}
 	for (int i = key->action_count - 1; i >= 0; i--) {
+		if (key->actions[i].type != LONG_PRESS)
+			break;
 		if (action_match(&key->actions[i], time))
 			return &key->actions[i];
 	}
@@ -337,12 +346,6 @@ static int handle_input(int fd, struct key *keys, int key_count,
 }
 
 static struct action *add_short_action(struct key *key) {
-	/* can only have one short key */
-	for (int i = 0; i < key->action_count; i++) {
-		xassert(key->actions[i].type != SHORT_PRESS,
-			"duplicate short key for key %s (%d), aborting.",
-			keyname_by_code(key->code), key->code);
-	}
 	struct action *action = &key->actions[key->action_count];
 	action->type = SHORT_PRESS;
 	action->trigger_time = DEFAULT_SHORT_PRESS_MSECS;
@@ -501,11 +504,18 @@ int main(int argc, char *argv[]) {
 	for (int i = 0; i < key_count; i++) {
 		sort_actions(&keys[i]);
 		for (int j = 1; j < keys[i].action_count; j++) {
-			xassert(keys[i].actions[j-1].type == SHORT_PRESS
-					|| keys[i].actions[j-1].trigger_time != keys[i].actions[j].trigger_time,
-				"Key %s was defined twice with %d ms action",
+			struct action *a1, *a2;
+			a1 = &keys[i].actions[j-1];
+			a2 = &keys[i].actions[j];
+			xassert(a1->type == a2->type || a1->trigger_time <= a2->trigger_time,
+				"Key %s had a short key (%d) longer than its shortest long key (%d)",
 				keyname_by_code(keys[i].code),
-				keys[i].actions[j].trigger_time)
+				a1->trigger_time, a2->trigger_time);
+			xassert(a1->type != a2->type || a1->trigger_time != a2->trigger_time,
+				"Key %s was defined twice with %d ms %s action",
+				keyname_by_code(keys[i].code),
+				a1->trigger_time,
+				a1->type == SHORT_PRESS ? "short" : "long");
 		}
 	}
 

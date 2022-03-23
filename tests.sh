@@ -102,6 +102,26 @@ run_inotify() {
 	PROCESSES[$testname]=$!
 }
 
+check_fail() {
+	local testname="$1"
+	shift
+
+	# skip tests we didn't ask for
+	case ",$ONLY," in
+	",,"|*",$testname,"*) ;;
+	*) return;;
+	esac
+
+	if [[ -n "$DRYRUN" ]]; then
+		printf '"%s" ' "$BUTTOND" "$@"
+		return
+	fi
+
+	if "$BUTTOND" "$@" 2>/dev/null; then
+		fail
+	fi
+}
+
 add_check() {
 	local testname="$1" file
 	shift
@@ -195,13 +215,31 @@ run_pattern shortlong 148,1,100 148,0,100 148,1,2200 -- \
 	-l 148 -t 2000 -a "touch shortlong_long"
 add_check shortlong e-shortlong_short e-shortlong_long
 
+run_pattern shortshortlong_1 148,1,100 148,0,100 -- \
+	-s 148 -a "touch shortshortlong_1_short" \
+	-s 148 -t 2000 -a "touch shortshortlong_1_short2" \
+	-l 148 -t 2000 -a "touch shortshortlong_1_long"
+add_check shortshortlong_1 e-shortshortlong_1_short ne-shortshortlong_1_short2 ne-shortshortlong_1_long
+
+run_pattern shortshortlong_2 148,1,1200 148,0,100 -- \
+	-s 148 -a "touch shortshortlong_2_short" \
+	-s 148 -t 2000 -a "touch shortshortlong_2_short2" \
+	-l 148 -t 2000 -a "touch shortshortlong_2_long"
+add_check shortshortlong_2 ne-shortshortlong_2_short e-shortshortlong_2_short2 ne-shortshortlong_2_long
+
+run_pattern shortshortlong_3 148,1,2200 148,0,100 -- \
+	-s 148 -a "touch shortshortlong_3_short" \
+	-l 148 -t 1000 -a "touch shortshortlong_3_long" \
+	-l 148 -t 2000 -a "touch shortshortlong_3_long2"
+add_check shortshortlong_3 ne-shortshortlong_3_short ne-shortshortlong_3_long e-shortshortlong_3_long2
+
 run_pattern shortlonglong_1 148,1,100 148,0,100 -- \
 	-s 148 -a "touch shortlonglong_1_short" \
-	-l 148 -t 1000 -a "touch shortlonglong_1_long" \
-	-l 148 -t 2000 -a "touch shortlonglong_1_long2"
+	-l 148 -t 2000 -a "touch shortlonglong_1_long2" \
+	-l 148 -t 1000 -a "touch shortlonglong_1_long"
 add_check shortlonglong_1 e-shortlonglong_1_short ne-shortlonglong_1_long ne-shortlonglong_1_long2
 
-run_pattern shortlonglong_2 148,1,1100 148,0,100 -- \
+run_pattern shortlonglong_2 148,1,1200 148,0,100 -- \
 	-s 148 -a "touch shortlonglong_2_short" \
 	-l 148 -t 2000 -a "touch shortlonglong_2_long2" \
 	-l 148 -t 1000 -a "touch shortlonglong_2_long"
@@ -239,6 +277,18 @@ add_check inotify e-inotify_ok
 run_inotify reopen 148,1,100 fdsf 148,0,0  -- \
 	-s 148 -a "touch reopen"
 add_check reopen e-reopen
+
+check_fail sametime_short /dev/null \
+	-s 148 -t 1000 -a "echo 1" \
+	-s 148 -t 1000 -a "echo 1"
+
+check_fail sametime_long /dev/null \
+	-s 148 -t 1000 -a "echo 1" \
+	-s 148 -t 1000 -a "echo 1"
+
+check_fail short_longer_long /dev/null \
+	-s 148 -t 2000 -a "echo 1" \
+	-l 148 -t 1000 -a "echo 1"
 
 check_all
 
