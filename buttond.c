@@ -13,6 +13,7 @@
 
 #include "buttond.h"
 #include "keynames.h"
+#include "version.h"
 
 /* debug:
  * -v (> 0/set): info message e.g. registered key presses
@@ -43,8 +44,8 @@ static struct option long_options[] = {
 	{0,		0,			0,  0  }
 };
 
-static void version(char *argv0) {
-	printf("%s version 0.1\n", argv0);
+static void version(void) {
+	printf("buttond version %s\n", BUTTOND_VERSION);
 }
 
 static void help(char *argv0) {
@@ -492,7 +493,7 @@ int main(int argc, char *argv[]) {
 			debug++;
 			break;
 		case 'V':
-			version(argv[0]);
+			version();
 			exit(EXIT_SUCCESS);
 		case 'h':
 			help(argv[0]);

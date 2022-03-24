@@ -1,7 +1,10 @@
 project(
   'buttond',
   'c',
-  version: '0.1',
+  version: run_command(
+    ['sh', '-c',
+      'git describe 2>/dev/null || awk -F"\"" "/define BUTTOND_VERSION/ { print \$2 }" version.h'
+    ], check: true).stdout().strip(),
   license: 'MIT',
   default_options: [
     'c_std=gnu17',
@@ -12,7 +15,8 @@ project(
 
 cc = meson.get_compiler('c')
 add_project_arguments(cc.get_supported_arguments([
-  '-D_GNU_SOURCE'
+  '-D_GNU_SOURCE',
+  '-DBUTTOND_VERSION="' + meson.project_version() + '"',
 ]), language: 'c')
 
 executable(

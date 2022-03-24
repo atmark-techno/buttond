@@ -5,10 +5,11 @@ else
 ETC ?= $(PREFIX)/etc
 endif
 
+VERSION := $(shell git describe 2>/dev/null || awk -F'"' '/define BUTTOND_VERSION/ { print $2 }' version.h)
 
 .PHONY: all install clean
 
-CFLAGS ?= -Wall -Wextra
+CFLAGS ?= -Wall -Wextra -DBUTTOND_VERSION=\"$(VERSION)\"
 
 all: buttond
 
