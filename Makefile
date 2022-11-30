@@ -5,7 +5,7 @@ else
 ETC ?= $(PREFIX)/etc
 endif
 
-VERSION := $(shell git describe 2>/dev/null || awk -F'"' '/define BUTTOND_VERSION/ { print $2 }' version.h)
+VERSION := $(shell git describe 2>/dev/null || awk -F'"' '/define BUTTOND_VERSION/ { print $$2 }' version.h)
 
 .PHONY: all install clean
 
