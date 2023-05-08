@@ -29,12 +29,14 @@ int debounce_msecs = 10;
 
 #define OPT_TEST 257
 #define OPT_DEBOUNCE_TIME 258
+#define OPT_EXIT_AFTER 259
 
 static struct option long_options[] = {
 	{"inotify",	required_argument,	0, 'i' },
 	{"short",	required_argument,	0, 's' },
 	{"long",	required_argument,	0, 'l' },
 	{"action",	required_argument,	0, 'a' },
+	{"exit-after",	no_argument,		0, OPT_EXIT_AFTER },
 	{"time",	required_argument,	0, 't' },
 	{"verbose",	no_argument,		0, 'v' },
 	{"version",	no_argument,		0, 'V' },
@@ -54,8 +56,10 @@ static void help(char *argv0) {
 	printf("  [files]: file(s) to get event from e.g. /dev/input/event2\n");
 	printf("           pass as many as needed to monitor multiple files\n");
 	printf("  -i <file>: same as non-option files, except if they disappear wait for them to come back\n");
-	printf("  -s/--short <key>  [-t/--time <time ms>] -a/--action <command>: action on short key press\n");
-	printf("  -l/--long <key> [-t/--time <time ms>] -a/--action <command>: action on long key press\n");
+	printf("  -s/--short <key>  [-t/--time <time ms>] [--exit-after] -a/--action <command>:\n");
+	printf("             action on short key press\n");
+	printf("  -l/--long <key> [-t/--time <time ms>] [--exit-after] -a/--action <command>:\n");
+	printf("             action on long key press\n");
 	printf("  -h, --help: show this help\n");
 	printf("  -V, --version: show version\n");
 	printf("  -v, --verbose: verbose (repeatable)\n\n");
@@ -107,7 +111,6 @@ static uint16_t find_key_by_name(char *arg) {
 
 #define keyname_by_code(code) \
 	((code < KEY_MAX && keynames[code]) ? keynames[code] : "unknown")
-
 
 
 static void print_key(struct input_event *event, const char *filename,
@@ -266,10 +269,22 @@ static void handle_timeouts(struct key *keys, int key_count) {
 						    &keys[i].tv_pressed);
 			struct action *action = find_key_action(&keys[i], diff);
 			if (action) {
-				if (debug)
-					printf("running %s after %"PRId64" ms\n",
-					       action->action, diff);
-				system(action->action);
+				/* special keys can have no action */
+				if (action->action && action->action[0]) {
+					if (debug)
+						printf("running %s after %"PRId64" ms\n",
+						       action->action, diff);
+					system(action->action);
+				}
+				if (action->exit_after) {
+					if (debug && keys[i].code)
+						printf("Exiting after processing key %s (%d)\n",
+						       keyname_by_code(keys[i].code),
+						       keys[i].code);
+					else if (debug)
+						printf("Exiting after stop timeout\n");
+					exit(0);
+				}
 			} else if (keys[i].state != KEY_DEBOUNCE) {
 				fprintf(stderr,
 					"Woke up for key %s (%d) after %"PRId64" ms without any associated action, this should not happen!\n",
@@ -501,6 +516,11 @@ int main(int argc, char *argv[]) {
 			xassert(cur_action->trigger_time,
 				"Could not parse trigger time (%s): %m",
 				optarg);
+			break;
+		case OPT_EXIT_AFTER:
+			xassert(cur_action,
+				"--exit-after can only be set after setting key code");
+			cur_action->exit_after = true;
 			break;
 		case 'v':
 			debug++;

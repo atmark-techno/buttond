@@ -18,6 +18,8 @@ struct action {
 	int trigger_time;
 	/* command to run */
 	char const *action;
+	/* whether to stop after action has been processed */
+	bool exit_after;
 };
 
 struct key {

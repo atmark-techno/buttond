@@ -188,6 +188,11 @@ run_pattern short_twohits 148,1,100 148,0,100 148,1,100 148,0,0 -- \
 	--debounce-time 0 > short_twohits
 add_check short_twohits l2-short_twohits
 
+run_pattern short_exit_after 148,1,100 148,0,100 148,1,100 148,0,0 -- \
+	-s 148 --exit-after -a "echo short" \
+	--debounce-time 0 > short_exit_after
+add_check short_exit_after l1-short_exit_after
+
 run_pattern short_debounce 148,1,100 148,0,5 148,1,100 148,0,0 -- \
 	-s 148 -a "echo short" \
 	--debounce-time 50 > short_debounce
