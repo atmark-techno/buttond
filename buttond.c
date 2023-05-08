@@ -272,9 +272,9 @@ static void handle_timeouts(struct key *keys, int key_count) {
 				system(action->action);
 			} else if (keys[i].state != KEY_DEBOUNCE) {
 				fprintf(stderr,
-					"Woke up for key %s (%d) without any associated action, this shuld not happen!\n",
+					"Woke up for key %s (%d) after %"PRId64" ms without any associated action, this should not happen!\n",
 					keyname_by_code(keys[i].code),
-					keys[i].code);
+					keys[i].code, diff);
 			} else if (debug) {
 				printf("ignoring key %s (%d) released after %"PRId64" ms\n",
 				       keyname_by_code(keys[i].code),

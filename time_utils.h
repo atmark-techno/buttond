@@ -13,14 +13,15 @@
 #define USECS_IN_SEC  1000000L
 #define USECS_IN_MSEC 1000L
 
-/* time difference in msecs */
+/* time difference in msecs
+ * Note we round up to the next ms */
 static inline long int time_diff_ts(struct timespec *ts1, struct timespec *ts2) {
-	return (ts1->tv_nsec - ts2->tv_nsec) / NSECS_IN_MSEC
+	return (ts1->tv_nsec - ts2->tv_nsec + NSECS_IN_MSEC - 1) / NSECS_IN_MSEC
 		+ (ts1->tv_sec - ts2->tv_sec) * 1000;
 }
 
 static inline long int time_diff_tv(struct timeval *tv1, struct timeval *tv2) {
-	return (tv1->tv_usec - tv2->tv_usec) / USECS_IN_MSEC
+	return (tv1->tv_usec - tv2->tv_usec + USECS_IN_MSEC - 1) / USECS_IN_MSEC
 		+ (tv1->tv_sec - tv2->tv_sec) * 1000;
 }
 
