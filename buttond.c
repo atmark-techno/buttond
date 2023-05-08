@@ -381,8 +381,8 @@ static void sort_actions(struct key *key) {
 
 static void add_input(char *path, struct input_file **p_input_files,
 		      int *p_input_count, bool inotify) {
-	int input_count = *p_input_count;
 	struct input_file *input_files = *p_input_files;
+	int input_count = *p_input_count;
 
 	/* skip directories */
 	struct stat sb;
@@ -415,8 +415,55 @@ static void add_input(char *path, struct input_file **p_input_files,
 	} else {
 		input_files[input_count].dirent = NULL;
 	}
-	*p_input_count = input_count + 1;
 	*p_input_files = input_files;
+	*p_input_count = input_count + 1;
+}
+
+struct action *add_action(char option, char *key,
+		struct key **p_keys, int *p_key_count) {
+	struct key *keys = *p_keys;
+	int key_count = *p_key_count;
+
+	/* try to find key by name first, then by code if it failed */
+	uint16_t code = find_key_by_name(key);
+	if (!code) {
+		code = strtou16(key);
+	}
+	xassert(code,
+		"key code (%s) should be a key name or its keycode",
+		key);
+
+	struct key *cur_key = NULL;
+	for (int i = 0; i < key_count; i++) {
+		if (keys[i].code == code) {
+			cur_key = &keys[i];
+			break;
+		}
+	}
+	if (!cur_key) {
+		keys = xreallocarray(keys, key_count + 1,
+				sizeof(*keys));
+		cur_key = &keys[key_count];
+		key_count++;
+		memset(cur_key, 0, sizeof(*cur_key));
+		cur_key->code = code;
+		cur_key->state = KEY_RELEASED;
+	}
+	cur_key->actions = xreallocarray(cur_key->actions,
+			cur_key->action_count + 1,
+			sizeof(*cur_key->actions));
+
+	struct action *action;
+	if (option == 's') {
+		action = add_short_action(cur_key);
+	} else {
+		action = add_long_action(cur_key);
+	}
+	action->action = NULL;
+	cur_key->action_count++;
+	*p_keys = keys;
+	*p_key_count = key_count;
+	return action;
 }
 
 int main(int argc, char *argv[]) {
@@ -440,41 +487,7 @@ int main(int argc, char *argv[]) {
 		case 'l':
 			xassert(!cur_action || cur_action->action != NULL,
 				"Must set action before specifying next key!");
-			/* try to find key by name first, then by code if it failed */
-			uint16_t code = find_key_by_name(optarg);
-			if (!code) {
-				code = strtou16(optarg);
-			}
-			xassert(code,
-				"key code (%s) should be a key name or its keycode",
-				optarg);
-
-			struct key *cur_key = NULL;
-			for (int i = 0; i < key_count; i++) {
-				if (keys[i].code == code) {
-					cur_key = &keys[i];
-					break;
-				}
-			}
-			if (!cur_key) {
-				keys = xreallocarray(keys, key_count + 1,
-						     sizeof(*keys));
-				cur_key = &keys[key_count];
-				key_count++;
-				memset(cur_key, 0, sizeof(*cur_key));
-				cur_key->code = code;
-				cur_key->state = KEY_RELEASED;
-			}
-			cur_key->actions = xreallocarray(cur_key->actions,
-							 cur_key->action_count + 1,
-							 sizeof(*cur_key->actions));
-			if (c == 's') {
-				cur_action = add_short_action(cur_key);
-			} else {
-				cur_action = add_long_action(cur_key);
-			}
-			cur_action->action = NULL;
-			cur_key->action_count++;
+			cur_action = add_action(c, optarg, &keys, &key_count);
 			break;
 		case 'a':
 			xassert(cur_action,
