@@ -38,6 +38,7 @@ static struct option long_options[] = {
 	{"action",	required_argument,	0, 'a' },
 	{"exit-after",	no_argument,		0, OPT_EXIT_AFTER },
 	{"time",	required_argument,	0, 't' },
+	{"exit-timeout",required_argument,	0, 'E' },
 	{"verbose",	no_argument,		0, 'v' },
 	{"version",	no_argument,		0, 'V' },
 	{"help",	no_argument,		0, 'h' },
@@ -60,6 +61,7 @@ static void help(char *argv0) {
 	printf("             action on short key press\n");
 	printf("  -l/--long <key> [-t/--time <time ms>] [--exit-after] -a/--action <command>:\n");
 	printf("             action on long key press\n");
+	printf("  -E/--exit-timeout <time ms>: exit after <time> milliseconds\n");
 	printf("  -h, --help: show this help\n");
 	printf("  -V, --version: show version\n");
 	printf("  -v, --verbose: verbose (repeatable)\n\n");
@@ -361,21 +363,6 @@ static int handle_input(int fd, struct key *keys, int key_count,
 	return 0;
 }
 
-static struct action *add_short_action(struct key *key) {
-	struct action *action = &key->actions[key->action_count];
-	action->type = SHORT_PRESS;
-	action->trigger_time = DEFAULT_SHORT_PRESS_MSECS;
-	return action;
-}
-
-static struct action *add_long_action(struct key *key) {
-	/* insert at the end, we'll move it when setting time */
-	struct action *action = &key->actions[key->action_count];
-	action->type = LONG_PRESS;
-	action->trigger_time = DEFAULT_LONG_PRESS_MSECS;
-	return action;
-}
-
 static int sort_actions_compare(const void *v1, const void *v2) {
 	const struct action *a1 = (const struct action*)v1;
 	const struct action *a2 = (const struct action*)v2;
@@ -434,17 +421,17 @@ static void add_input(char *path, struct input_file **p_input_files,
 	*p_input_count = input_count + 1;
 }
 
-struct action *add_action(char option, char *key,
+struct action *add_action(char option, char *key, char *exit_timeout,
 		struct key **p_keys, int *p_key_count) {
 	struct key *keys = *p_keys;
 	int key_count = *p_key_count;
 
 	/* try to find key by name first, then by code if it failed */
-	uint16_t code = find_key_by_name(key);
-	if (!code) {
+	uint16_t code = key ? find_key_by_name(key) : 0;
+	if (key && !code) {
 		code = strtou16(key);
 	}
-	xassert(code,
+	xassert(!key || code,
 		"key code (%s) should be a key name or its keycode",
 		key);
 
@@ -468,14 +455,34 @@ struct action *add_action(char option, char *key,
 			cur_key->action_count + 1,
 			sizeof(*cur_key->actions));
 
-	struct action *action;
-	if (option == 's') {
-		action = add_short_action(cur_key);
-	} else {
-		action = add_long_action(cur_key);
-	}
-	action->action = NULL;
+	/* insert at the end, we'll sort later */
+	struct action *action = &cur_key->actions[cur_key->action_count];
 	cur_key->action_count++;
+	memset(action, 0, sizeof(*action));
+	action->trigger_time = DEFAULT_SHORT_PRESS_MSECS;
+	switch (option) {
+	case 's':
+		action->type = SHORT_PRESS;
+		break;
+	case 'l':
+		action->type = LONG_PRESS;
+		break;
+	case 'E':
+		action->type = LONG_PRESS;
+		action->exit_after = true;
+		cur_key->state = KEY_PRESSED;
+		cur_key->has_wakeup = true;
+		action->trigger_time = strtoint(exit_timeout);
+		xassert(action->trigger_time,
+			"Could not parse trigger time (%s): %m",
+			exit_timeout);
+		time_gettime(&cur_key->ts_wakeup);
+		time_ts2tv(&cur_key->tv_pressed, &cur_key->ts_wakeup, 0);
+		time_add_ts(&cur_key->ts_wakeup, action->trigger_time);
+		break;
+	default:
+		xassert(false, "add_action should never be called with %c", option);
+	}
 	*p_keys = keys;
 	*p_key_count = key_count;
 	return action;
@@ -492,7 +499,7 @@ int main(int argc, char *argv[]) {
 	init_keynames();
 
 	int c;
-	while ((c = getopt_long(argc, argv, "i:s:l:a:t:vVh", long_options, NULL)) >= 0) {
+	while ((c = getopt_long(argc, argv, "i:s:l:a:t:E:vVh", long_options, NULL)) >= 0) {
 		switch (c) {
 		case 'i':
 			add_input(optarg, &input_files, &input_count, true);
@@ -502,7 +509,7 @@ int main(int argc, char *argv[]) {
 		case 'l':
 			xassert(!cur_action || cur_action->action != NULL,
 				"Must set action before specifying next key!");
-			cur_action = add_action(c, optarg, &keys, &key_count);
+			cur_action = add_action(c, optarg, NULL, &keys, &key_count);
 			break;
 		case 'a':
 			xassert(cur_action,
@@ -521,6 +528,12 @@ int main(int argc, char *argv[]) {
 			xassert(cur_action,
 				"--exit-after can only be set after setting key code");
 			cur_action->exit_after = true;
+			break;
+		case 'E':
+			xassert(!cur_action || cur_action->action != NULL,
+				"Cannot set stop timeout in the middle of defining a key");
+			/* add fake key with code 0 */
+			add_action('E', NULL, optarg, &keys, &key_count);
 			break;
 		case 'v':
 			debug++;

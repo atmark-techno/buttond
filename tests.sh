@@ -202,6 +202,11 @@ run_pattern longkey 148,1,2200 -- \
 	-l 148 -t 2000 -a "touch longkey"
 add_check longkey e-longkey
 
+run_pattern longkey_tooslow 148,1,2200 -- \
+	-E 1000 \
+	-l 148 -t 2000 -a "touch longkey"
+add_check longkey_tooslow ne-longkey_tooslow
+
 run_pattern longkey_norun 148,1,100 148,0,2000 -- \
 	-l 148 -t 2000 -a "touch longkey_norun"
 add_check longkey_norun ne-longkey_norun
