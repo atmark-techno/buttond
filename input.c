@@ -107,9 +107,10 @@ again:
 	return 1;
 }
 
-void reopen_input(struct input_file *input_file,
-		  struct pollfd *pollfd,
-		  struct pollfd *inotify) {
+void reopen_input(struct state *state, int i) {
+	struct input_file *input_file = &state->input_files[i];
+	struct pollfd *pollfd = &state->pollfds[i];
+	struct pollfd *inotify = &state->pollfds[state->input_count];
 	if (pollfd->fd >= 0) {
 		close(pollfd->fd);
 		pollfd->fd = -1;
@@ -150,45 +151,42 @@ void reopen_input(struct input_file *input_file,
 	pollfd->events = POLLIN;
 }
 
-static void handle_inotify_event(struct inotify_event *event,
-				 struct input_file *input_files,
-				 struct pollfd *pollfds,
-				 int input_count) {
+static void handle_inotify_event(struct state *state, struct inotify_event *event) {
 	/* skip events we don't care about */
 	if (!(event->mask & INOTIFY_WATCH_FLAGS))
 		return;
 
-	for (int i = 0; i < input_count; i++) {
+	for (int i = 0; i < state->input_count; i++) {
+		struct input_file *input_file = &state->input_files[i];
 		/* find inputs concerned */
-		if (event->wd != input_files[i].inotify_wd)
+		if (event->wd != input_file->inotify_wd)
 			continue;
 		if (debug > 2) {
 			printf("got inotify event for %s's directory (%s): %x\n",
-			       input_files[i].filename, event->name, event->mask);
+			       input_file->filename, event->name, event->mask);
 		}
 		if ((event->mask & IN_DELETE_SELF)) {
-			input_files[i].inotify_wd = -1;
-			inotify_watch(&input_files[i],
-				      &pollfds[input_count]);
+			input_file->inotify_wd = -1;
+			inotify_watch(input_file,
+				      &state->pollfds[state->input_count]);
 			/* we might have been raced there with yet another
 			 * re-creation, so also try to reopen even if it likely
 			 * won't work: continue here */
-		} else if (strcmp(event->name, input_files[i].dirent))
+		} else if (strcmp(event->name, input_file->dirent))
 			/* was it a filename we care about? */
 			continue;
 
 		if (debug) {
 			printf("trying to reopen %s\n",
-					input_files[i].filename);
+					input_file->filename);
 		}
-		reopen_input(&input_files[i], &pollfds[i],
-				&pollfds[input_count]);
+		reopen_input(state, i);
 	}
 
 }
-void handle_inotify(struct input_file *input_files, struct pollfd *pollfds,
-		    int input_count) {
-	int fd = pollfds[input_count].fd;
+
+void handle_inotify(struct state *state) {
+	int fd = state->pollfds[state->input_count].fd;
 	struct inotify_event *event;
 	/* read more at a time. Align because man page example does... */
 	char buf[4096]
@@ -202,8 +200,7 @@ void handle_inotify(struct input_file *input_files, struct pollfd *pollfds,
 			xassert((char*)event < buf + n + event->len,
 				"inotify event read has a weird size");
 
-			handle_inotify_event(event, input_files,
-					     pollfds, input_count);
+			handle_inotify_event(state, event);
 		}
 		xassert((char*)event == buf + n,
 			"libinput event we read had a weird size: %zd / %d",

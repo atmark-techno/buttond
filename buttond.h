@@ -46,7 +46,7 @@ struct key {
 	 * - DEBOUNCE: immediately after being released for DEBOUNCE_MSECS
 	 * - HANDLED: long press already handled (ignore until release)
 	 */
-	enum state {
+	enum key_state {
 		KEY_RELEASED,
 		KEY_PRESSED,
 		KEY_DEBOUNCE,
@@ -61,15 +61,19 @@ struct input_file {
 	int inotify_wd;
 };
 
+struct state {
+	struct key *keys;
+	struct input_file *input_files;
+	struct pollfd *pollfds;
+	int key_count;
+	int input_count;
+};
 
 extern int debug;
 extern int test_mode;
 
 
-void reopen_input(struct input_file *input_file,
-		  struct pollfd *pollfd,
-		  struct pollfd *inotify);
-void handle_inotify(struct input_file *input_files, struct pollfd *pollfds,
-		    int input_count);
+void reopen_input(struct state *state, int i);
+void handle_inotify(struct state *state);
 
 #endif

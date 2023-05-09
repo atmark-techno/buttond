@@ -336,8 +336,9 @@ static void handle_input_event(struct input_event *event,
 }
 
 
-static int handle_input(int fd, struct key *keys, int key_count,
-			 const char *filename) {
+static int handle_input(struct state *state, int i) {
+	int fd = state->pollfds[i].fd;
+	const char *filename = state->input_files[i].filename;
 	struct input_event *event;
 	char buf[4096]
 		__attribute__ ((aligned(__alignof__(*event))));
@@ -353,7 +354,8 @@ static int handle_input(int fd, struct key *keys, int key_count,
 		for (event = (struct input_event*)buf;
 		     (char*)event + sizeof(event) <= buf + n;
 		     event++) {
-			handle_input_event(event, keys, key_count, filename);
+			handle_input_event(event, state->keys, state->key_count,
+					   filename);
 		}
 	}
 	if (n < 0) {
@@ -381,11 +383,7 @@ static void sort_actions(struct key *key) {
 		sizeof(key->actions[0]), sort_actions_compare);
 }
 
-static void add_input(char *path, struct input_file **p_input_files,
-		      int *p_input_count, bool inotify) {
-	struct input_file *input_files = *p_input_files;
-	int input_count = *p_input_count;
-
+static void add_input(char *path, struct state *state, bool inotify) {
 	/* skip directories */
 	struct stat sb;
 	if (stat(path, &sb) == 0) {
@@ -401,31 +399,29 @@ static void add_input(char *path, struct input_file **p_input_files,
 			path);
 	}
 
-	input_files = xreallocarray(input_files, input_count + 1,
-			sizeof(*input_files));
-	input_files[input_count].filename = path;
+	state->input_files = xreallocarray(state->input_files,
+			state->input_count + 1,
+			sizeof(*state->input_files));
+	struct input_file *input_file = &state->input_files[state->input_count];
+	state->input_count++;
+	input_file->filename = path;
 	if (inotify) {
-		input_files[input_count].inotify_wd = -1;
-		input_files[input_count].dirent = strrchr(path, '/');
-		if (input_files[input_count].dirent) {
-			input_files[input_count].dirent++;
+		input_file->inotify_wd = -1;
+		input_file->dirent = strrchr(path, '/');
+		if (input_file->dirent) {
+			input_file->dirent++;
 		} else {
-			input_files[input_count].dirent = path;
+			input_file->dirent = path;
 		}
-		xassert(input_files[input_count].dirent[0] != 0,
+		xassert(input_file->dirent[0] != 0,
 				"Invalid filename %s", path);
 	} else {
-		input_files[input_count].dirent = NULL;
+		input_file->dirent = NULL;
 	}
-	*p_input_files = input_files;
-	*p_input_count = input_count + 1;
 }
 
 struct action *add_action(char option, char *key, char *exit_timeout,
-		struct key **p_keys, int *p_key_count) {
-	struct key *keys = *p_keys;
-	int key_count = *p_key_count;
-
+		struct state *state) {
 	/* try to find key by name first, then by code if it failed */
 	uint16_t code = key ? find_key_by_name(key) : 0;
 	if (key && !code) {
@@ -436,17 +432,18 @@ struct action *add_action(char option, char *key, char *exit_timeout,
 		key);
 
 	struct key *cur_key = NULL;
-	for (int i = 0; i < key_count; i++) {
-		if (keys[i].code == code) {
-			cur_key = &keys[i];
+	for (int i = 0; i < state->key_count; i++) {
+		if (state->keys[i].code == code) {
+			cur_key = &state->keys[i];
 			break;
 		}
 	}
 	if (!cur_key) {
-		keys = xreallocarray(keys, key_count + 1,
-				sizeof(*keys));
-		cur_key = &keys[key_count];
-		key_count++;
+		state->keys = xreallocarray(state->keys,
+					    state->key_count + 1,
+					    sizeof(*state->keys));
+		cur_key = &state->keys[state->key_count];
+		state->key_count++;
 		memset(cur_key, 0, sizeof(*cur_key));
 		cur_key->code = code;
 		cur_key->state = KEY_RELEASED;
@@ -483,18 +480,13 @@ struct action *add_action(char option, char *key, char *exit_timeout,
 	default:
 		xassert(false, "add_action should never be called with %c", option);
 	}
-	*p_keys = keys;
-	*p_key_count = key_count;
 	return action;
 }
 
 int main(int argc, char *argv[]) {
-	struct input_file *input_files = NULL;
-	struct key *keys = NULL;
+	struct state state = { 0 };
 	struct action *cur_action = NULL;
 	bool inotify_enabled = false;
-	int input_count = 0;
-	int key_count = 0;
 
 	init_keynames();
 
@@ -502,14 +494,14 @@ int main(int argc, char *argv[]) {
 	while ((c = getopt_long(argc, argv, "i:s:l:a:t:E:vVh", long_options, NULL)) >= 0) {
 		switch (c) {
 		case 'i':
-			add_input(optarg, &input_files, &input_count, true);
+			add_input(optarg, &state, true);
 			inotify_enabled = true;
 			break;
 		case 's':
 		case 'l':
 			xassert(!cur_action || cur_action->action != NULL,
 				"Must set action before specifying next key!");
-			cur_action = add_action(c, optarg, NULL, &keys, &key_count);
+			cur_action = add_action(c, optarg, NULL, &state);
 			break;
 		case 'a':
 			xassert(cur_action,
@@ -533,7 +525,7 @@ int main(int argc, char *argv[]) {
 			xassert(!cur_action || cur_action->action != NULL,
 				"Cannot set stop timeout in the middle of defining a key");
 			/* add fake key with code 0 */
-			add_action('E', NULL, optarg, &keys, &key_count);
+			add_action('E', NULL, optarg, &state);
 			break;
 		case 'v':
 			debug++;
@@ -556,71 +548,67 @@ int main(int argc, char *argv[]) {
 		}
 	}
 	for (int i = optind; i < argc; i++) {
-		add_input(argv[i], &input_files, &input_count, false);
+		add_input(argv[i], &state, false);
 	}
-	xassert(input_count > 0,
+	xassert(state.input_count > 0,
 		"No input have been given, exiting");
-	xassert(key_count > 0 || debug > 1,
+	xassert(state.key_count > 0 || debug > 1,
 		"No action given, exiting");
 	xassert(!cur_action || cur_action->action != NULL,
 		"Last key press was defined without action");
-	for (int i = 0; i < key_count; i++) {
-		sort_actions(&keys[i]);
-		for (int j = 1; j < keys[i].action_count; j++) {
+	for (int i = 0; i < state.key_count; i++) {
+		struct key *key = &state.keys[i];
+		sort_actions(key);
+		for (int j = 1; j < key->action_count; j++) {
 			struct action *a1, *a2;
-			a1 = &keys[i].actions[j-1];
-			a2 = &keys[i].actions[j];
+			a1 = &key->actions[j-1];
+			a2 = &key->actions[j];
 			xassert(a1->type == a2->type || a1->trigger_time <= a2->trigger_time,
 				"Key %s had a short key (%d) longer than its shortest long key (%d)",
-				keyname_by_code(keys[i].code),
+				keyname_by_code(key->code),
 				a1->trigger_time, a2->trigger_time);
 			xassert(a1->type != a2->type || a1->trigger_time != a2->trigger_time,
 				"Key %s was defined twice with %d ms %s action",
-				keyname_by_code(keys[i].code),
+				keyname_by_code(key->code),
 				a1->trigger_time,
 				a1->type == SHORT_PRESS ? "short" : "long");
 		}
 	}
 
-	struct pollfd *pollfd = xcalloc(input_count + inotify_enabled,
-					sizeof(*pollfd));
-	for (int i = 0; i < input_count; i++) {
-		pollfd[i].fd = -1;
-		reopen_input(&input_files[i], &pollfd[i],
-				     &pollfd[input_count]);
+	state.pollfds = xcalloc(state.input_count + inotify_enabled, sizeof(*state.pollfds));
+	for (int i = 0; i < state.input_count; i++) {
+		state.pollfds[i].fd = -1;
+		reopen_input(&state, i);
 	}
 
 	while (1) {
-		int timeout = compute_timeout(keys, key_count);
-		int n = poll(pollfd, input_count + inotify_enabled, timeout);
+		int timeout = compute_timeout(state.keys, state.key_count);
+		int n = poll(state.pollfds, state.input_count + inotify_enabled, timeout);
 		if (n < 0 && (errno == EINTR || errno == EAGAIN))
 			continue;
 		xassert(n >= 0, "Poll failure: %m");
 
-		handle_timeouts(keys, key_count);
+		handle_timeouts(state.keys, state.key_count);
 		if (n == 0)
 			continue;
-		for (int i = 0; i < input_count; i++) {
-			if (pollfd[i].revents == 0)
+		for (int i = 0; i < state.input_count; i++) {
+			if (state.pollfds[i].revents == 0)
 				continue;
-			if (!(pollfd[i].revents & POLLIN)) {
+			if (!(state.pollfds[i].revents & POLLIN)) {
 				if (test_mode)
 					exit(0);
 				fprintf(stderr, "got HUP/ERR on %s. Trying to reopen.\n",
-					input_files[i].filename);
-				reopen_input(&input_files[i], &pollfd[i],
-					     &pollfd[input_count]);
+					state.input_files[i].filename);
+				reopen_input(&state, i);
 			}
-			if (handle_input(pollfd[i].fd, keys, key_count,
-					 input_files[i].filename)) {
-				reopen_input(&input_files[i], &pollfd[i],
-					     &pollfd[input_count]);
+			if (handle_input(&state, i)) {
+				reopen_input(&state, i);
 			}
 		}
-		if (inotify_enabled && pollfd[input_count].revents) {
-			xassert(pollfd[input_count].revents & POLLIN,
+		if (inotify_enabled && state.pollfds[state.input_count].revents) {
+			xassert(state.pollfds[state.input_count].revents & POLLIN,
 				"inotify fd went bad");
-			handle_inotify(input_files, pollfd, input_count);
+			handle_inotify(&state);
 		}
 	}
 
