@@ -79,6 +79,7 @@ extern int test_mode;
 void init_keynames(void);
 uint16_t find_key_by_name (char *arg);
 const char *keyname_by_code(uint16_t code);
+void arm_key_press(struct key *key, bool reset_pressed);
 void handle_key(struct state *state, struct input_event *event, struct key *key);
 int compute_timeout(struct key *keys, int key_count);
 void handle_timeouts(struct key *keys, int key_count);

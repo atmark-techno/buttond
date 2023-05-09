@@ -47,6 +47,27 @@ static void tv_from_event(struct timeval *tv, struct input_event *event) {
 	tv->tv_usec = event->input_event_usec;
 }
 
+void arm_key_press(struct key *key, bool reset_pressed) {
+	key->state = KEY_PRESSED;
+
+	/* short action is always first, so if last action is not LONG there
+	 * are none. We only set a timeout if we have one.*/
+	struct action *action = &key->actions[key->action_count-1];
+	if (action->type != LONG_PRESS) {
+		key->has_wakeup = false;
+		return;
+	}
+	key->has_wakeup = true;
+	if (reset_pressed) {
+		time_gettime(&key->ts_wakeup);
+		time_ts2tv(&key->tv_pressed, &key->ts_wakeup, 0);
+                time_add_ts(&key->ts_wakeup, action->trigger_time);
+	} else {
+		time_tv2ts(&key->ts_wakeup, &key->tv_pressed,
+			   action->trigger_time);
+	}
+}
+
 void handle_key(struct state *state, struct input_event *event,
 		struct key *key) {
 	switch (key->state) {
@@ -60,19 +81,7 @@ void handle_key(struct state *state, struct input_event *event,
 		if (key->state == KEY_RELEASED) {
 			tv_from_event(&key->tv_pressed, event);
 		}
-		key->state = KEY_PRESSED;
-
-		/* short action is always first, so if last action is not LONG there
-		 * are none. We only set a timeout if we have one.*/
-		struct action *action = &key->actions[key->action_count-1];
-		if (action->type == LONG_PRESS) {
-			key->has_wakeup = true;
-			time_tv2ts(&key->ts_wakeup, &key->tv_pressed,
-				   action->trigger_time);
-		} else {
-			/* ... but make sure we cancel any other remaining wakeup */
-			key->has_wakeup = false;
-		}
+		arm_key_press(key, false);
 		break;
 	case KEY_PRESSED:
 		/* ignore repress */

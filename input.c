@@ -47,6 +47,38 @@ static void touch(char *dir, char *file) {
 	xassert(close(fd) == 0, "Could not close newly-opened fd (%s): %m", buf);
 }
 
+/* simple bitmask is_set helper */
+static bool is_bit_set(unsigned char *bitmap, int code) {
+	xassert(code < KEY_MAX, "Invalid code %d\n", code);
+	return !!(bitmap[code / 8] & (1 << (code % 8)));
+}
+
+/* refresh currently down keys after open */
+static void check_pressed_keys(struct state *state, int fd) {
+	/* not applicable to pipes in tests... */
+	if (test_mode)
+		return;
+
+	unsigned char key_states[KEY_MAX/8 + 1] = { 0 };
+	int max;
+	max = ioctl(fd, EVIOCGKEY(sizeof(key_states)), key_states);
+	xassert(max >= 0, "EVIOCGKEY failed: %m");
+	max = max * 8;
+
+	for (int i = 0; i < state->key_count; i++) {
+		struct key *key = &state->keys[i];
+		if (key->code > max)
+			continue;
+		if (is_bit_set(key_states, key->code)) {
+			if (debug) {
+				printf("key %s (%d) was up on open\n",
+					keyname_by_code(key->code), key->code);
+			}
+			arm_key_press(key, true);
+		}
+	}
+}
+
 /* return 1 if something was done */
 static int inotify_watch(struct input_file *input_file,
 			  struct pollfd *inotify) {
@@ -146,6 +178,7 @@ void reopen_input(struct state *state, int i) {
 				"Inotify not enabled for this file: aborting");
 		return;
 	}
+	check_pressed_keys(state, fd);
 
 	pollfd->fd = fd;
 	pollfd->events = POLLIN;

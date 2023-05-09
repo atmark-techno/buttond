@@ -180,16 +180,12 @@ struct action *add_action(char option, char *key, char *exit_timeout,
 		break;
 	case 'E':
 		action->type = LONG_PRESS;
-		action->exit_after = true;
-		cur_key->state = KEY_PRESSED;
-		cur_key->has_wakeup = true;
 		action->trigger_time = strtoint(exit_timeout);
+		action->exit_after = true;
 		xassert(action->trigger_time,
 			"Could not parse trigger time (%s): %m",
 			exit_timeout);
-		time_gettime(&cur_key->ts_wakeup);
-		time_ts2tv(&cur_key->tv_pressed, &cur_key->ts_wakeup, 0);
-		time_add_ts(&cur_key->ts_wakeup, action->trigger_time);
+		arm_key_press(cur_key, true);
 		break;
 	default:
 		xassert(false, "add_action should never be called with %c", option);
