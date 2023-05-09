@@ -4,6 +4,7 @@
 #define BUTTOND_H
 
 #include <stdbool.h>
+#include <linux/input.h>
 
 #include "utils.h"
 #include "time_utils.h"
@@ -67,13 +68,24 @@ struct state {
 	struct pollfd *pollfds;
 	int key_count;
 	int input_count;
+	int debounce_msecs;
 };
 
 extern int debug;
 extern int test_mode;
 
 
+/* keys.c */
+void init_keynames(void);
+uint16_t find_key_by_name (char *arg);
+const char *keyname_by_code(uint16_t code);
+void handle_key(struct state *state, struct input_event *event, struct key *key);
+int compute_timeout(struct key *keys, int key_count);
+void handle_timeouts(struct key *keys, int key_count);
+
+/* input.c */
 void reopen_input(struct state *state, int i);
 void handle_inotify(struct state *state);
+int handle_input(struct state *state, int i);
 
 #endif

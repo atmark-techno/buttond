@@ -21,7 +21,7 @@ add_project_arguments(cc.get_supported_arguments([
 
 executable(
   'buttond',
-  'buttond.c', 'input.c',
+  'buttond.c', 'input.c', 'keys.c',
   install: true
 )
 

@@ -208,3 +208,88 @@ void handle_inotify(struct state *state) {
 	}
 	xassert(n >= 0, "Did not read expected amount from inotify fd: %d", n);
 }
+
+static void print_key(struct input_event *event, const char *filename,
+		      const char *message) {
+	if (debug < 1)
+		return;
+	switch (event->type) {
+	case 0:
+		/* extra info pertaining previous event: don't print */
+		return;
+	case 1:
+		printf("[%ld.%03ld] %s%s%s (%d) %s: %s\n",
+		       event->input_event_sec, event->input_event_usec / 1000,
+		       debug > 2 ? filename : "",
+		       debug > 2 ? " " : "",
+		       keyname_by_code(event->code), event->code,
+		       event->value ? "pressed" : "released",
+		       message);
+		break;
+	default:
+		printf("[%ld.%03ld] %s%s%d %d %d: %s\n",
+		       event->input_event_sec, event->input_event_usec / 1000,
+		       debug > 2 ? filename : "",
+		       debug > 2 ? " " : "",
+		       event->type, event->code, event->value,
+		       message);
+	}
+}
+
+
+static void handle_input_event(struct state *state,
+			       struct input_event *event,
+			       const char *filename) {
+	/* ignore non-keyboard events */
+	if (event->type != 1) {
+		if (debug > 2)
+			print_key(event, filename, "non-keyboard event ignored");
+		return;
+	}
+
+	struct key *key = NULL;
+	for (int i = 0; i < state->key_count; i++) {
+		if (state->keys[i].code == event->code) {
+			key = &state->keys[i];
+			break;
+		}
+	}
+	/* ignore unconfigured key */
+	if (!key) {
+		if (debug > 1)
+			print_key(event, filename, "ignored");
+		return;
+	}
+	print_key(event, filename, "processing");
+
+	handle_key(state, event, key);
+}
+
+
+int handle_input(struct state *state, int i) {
+	int fd = state->pollfds[i].fd;
+	const char *filename = state->input_files[i].filename;
+	struct input_event *event;
+	char buf[4096]
+		__attribute__ ((aligned(__alignof__(*event))));
+	int n = 0;
+
+	while ((n = read_safe(fd, &buf, sizeof(buf))) > 0) {
+		if (n % sizeof(*event) != 0) {
+			fprintf(stderr,
+				"Read something that is not a multiple of event size (%d / %zd) !? Trying to reopen\n",
+				n, sizeof(*event));
+			return -1;
+		}
+		for (event = (struct input_event*)buf;
+		     (char*)event + sizeof(event) <= buf + n;
+		     event++) {
+			handle_input_event(state, event, filename);
+		}
+	}
+	if (n < 0) {
+		fprintf(stderr, "read error: %d. Trying to reopen\n", -n);
+		return -1;
+	}
+	return 0;
+}

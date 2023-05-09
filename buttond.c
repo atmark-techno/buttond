@@ -4,15 +4,12 @@
  * Copyright (c) 2021 Atmark Techno,Inc.
  */
 
-#include <ctype.h>
 #include <getopt.h>
-#include <linux/input.h>
 #include <poll.h>
 #include <string.h>
 #include <sys/stat.h>
 
 #include "buttond.h"
-#include "keynames.h"
 #include "version.h"
 
 /* debug:
@@ -25,7 +22,7 @@ int debug = 0;
 int test_mode = 0;
 #define DEFAULT_LONG_PRESS_MSECS 5000
 #define DEFAULT_SHORT_PRESS_MSECS 1000
-int debounce_msecs = 10;
+#define DEFAULT_DEBOUNCE_MSECS 10
 
 #define OPT_TEST 257
 #define OPT_DEBOUNCE_TIME 258
@@ -79,290 +76,7 @@ static void help(char *argv0) {
 
 	printf("Note some keyboards have repeat built in firmware so quick repetitions\n");
 	printf("(<%dms) are handled as if key were pressed continuously\n",
-	       debounce_msecs);
-}
-
-static const char *keynames[KEY_MAX];
-
-static void init_keynames(void) {
-	size_t idx = 0;
-	/* starts at 1... */
-	for (int i = 1;
-	     i < KEY_MAX && idx < sizeof(allkeynames);
-	     i++, idx += strlen(&allkeynames[idx]) + 1) {
-		keynames[i] = &allkeynames[idx];
-	}
-}
-
-static uint16_t find_key_by_name(char *arg) {
-	/* XXX if this is too slow try to optimize later, but list is not so big */
-	for (int i = 0; arg[i]; i++) {
-		/* We require ASCII name anyway: make it uppercase to match header.
-		 * This doesn't bother pure digits for fallback. */
-		arg[i] = toupper(arg[i]);
-	}
-	for (size_t i = 0; i < KEY_MAX; i++) {
-		if (!keynames[i])
-			continue;
-		if (strcmp(keynames[i], arg) == 0) {
-			return i;
-		}
-	}
-	return 0;
-}
-
-#define keyname_by_code(code) \
-	((code < KEY_MAX && keynames[code]) ? keynames[code] : "unknown")
-
-
-static void print_key(struct input_event *event, const char *filename,
-		      const char *message) {
-	if (debug < 1)
-		return;
-	switch (event->type) {
-	case 0:
-		/* extra info pertaining previous event: don't print */
-		return;
-	case 1:
-		printf("[%ld.%03ld] %s%s%s (%d) %s: %s\n",
-		       event->input_event_sec, event->input_event_usec / 1000,
-		       debug > 2 ? filename : "",
-		       debug > 2 ? " " : "",
-		       keyname_by_code(event->code), event->code,
-		       event->value ? "pressed" : "released",
-		       message);
-		break;
-	default:
-		printf("[%ld.%03ld] %s%s%d %d %d: %s\n",
-		       event->input_event_sec, event->input_event_usec / 1000,
-		       debug > 2 ? filename : "",
-		       debug > 2 ? " " : "",
-		       event->type, event->code, event->value,
-		       message);
-	}
-}
-
-static void tv_from_event(struct timeval *tv, struct input_event *event) {
-	/* input_event has a timeval struct on 64bit systems,
-	 * but it is not guaranteed so copy manually
-	 */
-	tv->tv_sec = event->input_event_sec;
-	tv->tv_usec = event->input_event_usec;
-}
-
-static void handle_key(struct input_event *event, struct key *key) {
-	switch (key->state) {
-	case KEY_RELEASED:
-	case KEY_DEBOUNCE:
-		/* new key press -- can be a release if program started with key or handled long press */
-		if (event->value == 0)
-			break;
-
-		/* don't reset timestamp/wakeup on debounce */
-		if (key->state == KEY_RELEASED) {
-			tv_from_event(&key->tv_pressed, event);
-		}
-		key->state = KEY_PRESSED;
-
-		/* short action is always first, so if last action is not LONG there
-		 * are none. We only set a timeout if we have one.*/
-		struct action *action = &key->actions[key->action_count-1];
-		if (action->type == LONG_PRESS) {
-			key->has_wakeup = true;
-			time_tv2ts(&key->ts_wakeup, &key->tv_pressed,
-				   action->trigger_time);
-		} else {
-			/* ... but make sure we cancel any other remaining wakeup */
-			key->has_wakeup = false;
-		}
-		break;
-	case KEY_PRESSED:
-		/* ignore repress */
-		if (event->value != 0)
-			break;
-		/* mark key for debounce, we will handle event after timeout */
-		key->state = KEY_DEBOUNCE;
-		tv_from_event(&key->tv_released, event);
-		key->has_wakeup = true;
-		time_gettime(&key->ts_wakeup);
-		time_add_ts(&key->ts_wakeup, debounce_msecs);
-		break;
-	case KEY_HANDLED:
-		/* ignore until key down */
-		if (event->value != 0)
-			break;
-		key->state = KEY_RELEASED;
-	}
-}
-
-static int compute_timeout(struct key *keys, int key_count) {
-	int i;
-	int timeout = -1;
-	struct timespec ts;
-	time_gettime(&ts);
-
-	for (i = 0; i < key_count; i++) {
-		if (keys[i].has_wakeup) {
-			int64_t diff = time_diff_ts(&keys[i].ts_wakeup, &ts);
-			if (diff < 0)
-				timeout = 0;
-			else if (timeout == -1 || diff < timeout)
-				timeout = diff;
-		}
-	}
-	if (debug > 3) {
-		if (timeout >= 0) {
-			printf("wakeup scheduled in %d\n", timeout);
-		} else {
-			printf("no wakeup scheduled\n");
-		}
-	}
-
-	return timeout;
-}
-
-static bool action_match(struct action *action, int time) {
-	switch (action->type) {
-	case LONG_PRESS:
-		return time >= action->trigger_time;
-	case SHORT_PRESS:
-		return time < action->trigger_time;
-	default:
-		xassert(false, "invalid action!!");
-	}
-}
-
-static struct action *find_key_action(struct key *key, int time) {
-	/* check short keys in growing order, then long keys in
-	 * decreasing order to get the best match */
-	for (int i = 0; i < key->action_count; i++) {
-		if (key->actions[i].type != SHORT_PRESS)
-			break;
-		if (action_match(&key->actions[i], time))
-			return &key->actions[i];
-	}
-	for (int i = key->action_count - 1; i >= 0; i--) {
-		if (key->actions[i].type != LONG_PRESS)
-			break;
-		if (action_match(&key->actions[i], time))
-			return &key->actions[i];
-	}
-	return NULL;
-}
-
-static void handle_timeouts(struct key *keys, int key_count) {
-	int i;
-	struct timespec ts;
-	time_gettime(&ts);
-
-	for (i = 0; i < key_count; i++) {
-		if (keys[i].has_wakeup
-		    && (time_diff_ts(&keys[i].ts_wakeup, &ts) <= 0)) {
-			if (debug > 3)
-				printf("we are %ld ahead of timeout\n",
-				       time_diff_ts(&keys[i].ts_wakeup, &ts));
-
-			if (keys[i].state != KEY_DEBOUNCE) {
-				/* key still pressed - set artifical release time */
-				time_ts2tv(&keys[i].tv_released, &ts, 0);
-			}
-
-			int64_t diff = time_diff_tv(&keys[i].tv_released,
-						    &keys[i].tv_pressed);
-			struct action *action = find_key_action(&keys[i], diff);
-			if (action) {
-				/* special keys can have no action */
-				if (action->action && action->action[0]) {
-					if (debug)
-						printf("running %s after %"PRId64" ms\n",
-						       action->action, diff);
-					system(action->action);
-				}
-				if (action->exit_after) {
-					if (debug && keys[i].code)
-						printf("Exiting after processing key %s (%d)\n",
-						       keyname_by_code(keys[i].code),
-						       keys[i].code);
-					else if (debug)
-						printf("Exiting after stop timeout\n");
-					exit(0);
-				}
-			} else if (keys[i].state != KEY_DEBOUNCE) {
-				fprintf(stderr,
-					"Woke up for key %s (%d) after %"PRId64" ms without any associated action, this should not happen!\n",
-					keyname_by_code(keys[i].code),
-					keys[i].code, diff);
-			} else if (debug) {
-				printf("ignoring key %s (%d) released after %"PRId64" ms\n",
-				       keyname_by_code(keys[i].code),
-				       keys[i].code, diff);
-			}
-
-			keys[i].has_wakeup = false;
-			if (keys[i].state == KEY_DEBOUNCE)
-				keys[i].state = KEY_RELEASED;
-			else
-				keys[i].state = KEY_HANDLED;
-		}
-	}
-}
-
-static void handle_input_event(struct input_event *event,
-			       struct key *keys, int key_count,
-			       const char *filename) {
-	/* ignore non-keyboard events */
-	if (event->type != 1) {
-		if (debug > 2)
-			print_key(event, filename, "non-keyboard event ignored");
-		return;
-	}
-
-	struct key *key = NULL;
-	for (int i = 0; i < key_count; i++) {
-		if (keys[i].code == event->code) {
-			key = &keys[i];
-			break;
-		}
-	}
-	/* ignore unconfigured key */
-	if (!key) {
-		if (debug > 1)
-			print_key(event, filename, "ignored");
-		return;
-	}
-	print_key(event, filename, "processing");
-
-	handle_key(event, key);
-}
-
-
-static int handle_input(struct state *state, int i) {
-	int fd = state->pollfds[i].fd;
-	const char *filename = state->input_files[i].filename;
-	struct input_event *event;
-	char buf[4096]
-		__attribute__ ((aligned(__alignof__(*event))));
-	int n = 0;
-
-	while ((n = read_safe(fd, &buf, sizeof(buf))) > 0) {
-		if (n % sizeof(*event) != 0) {
-			fprintf(stderr,
-				"Read something that is not a multiple of event size (%d / %zd) !? Trying to reopen\n",
-				n, sizeof(*event));
-			return -1;
-		}
-		for (event = (struct input_event*)buf;
-		     (char*)event + sizeof(event) <= buf + n;
-		     event++) {
-			handle_input_event(event, state->keys, state->key_count,
-					   filename);
-		}
-	}
-	if (n < 0) {
-		fprintf(stderr, "read error: %d. Trying to reopen\n", -n);
-		return -1;
-	}
-	return 0;
+	       DEFAULT_DEBOUNCE_MSECS);
 }
 
 static int sort_actions_compare(const void *v1, const void *v2) {
@@ -484,7 +198,9 @@ struct action *add_action(char option, char *key, char *exit_timeout,
 }
 
 int main(int argc, char *argv[]) {
-	struct state state = { 0 };
+	struct state state = {
+		.debounce_msecs = DEFAULT_DEBOUNCE_MSECS,
+	};
 	struct action *cur_action = NULL;
 	bool inotify_enabled = false;
 
@@ -540,7 +256,7 @@ int main(int argc, char *argv[]) {
 			test_mode = true;
 			break;
 		case OPT_DEBOUNCE_TIME:
-			debounce_msecs = strtoint(optarg);
+			state.debounce_msecs = strtoint(optarg);
 			break;
 		default:
 			help(argv[0]);
