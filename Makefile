@@ -18,10 +18,10 @@ keynames.h: gen_keynames_h.sh
 
 buttond.o: buttond.c buttond.h time_utils.h utils.h keynames.h
 input.o: input.c buttond.h time_utils.h utils.h
-buttond: buttond.o input.o
+buttond: buttond.o input.o keys.o
 
 clean:
-	rm -f buttond buttond.o input.o
+	rm -f buttond buttond.o input.o keys.o
 
 check:
 	./tests.sh
