@@ -118,6 +118,7 @@ static void add_input(char *path, struct state *state, bool inotify) {
 			sizeof(*state->input_files));
 	struct input_file *input_file = &state->input_files[state->input_count];
 	state->input_count++;
+	memset(input_file, 0, sizeof(*input_file));
 	input_file->filename = path;
 	if (inotify) {
 		input_file->inotify_wd = -1;
@@ -129,8 +130,6 @@ static void add_input(char *path, struct state *state, bool inotify) {
 		}
 		xassert(input_file->dirent[0] != 0,
 				"Invalid filename %s", path);
-	} else {
-		input_file->dirent = NULL;
 	}
 }
 
