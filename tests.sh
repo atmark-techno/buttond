@@ -2,22 +2,26 @@
 
 # shellcheck disable=SC2094 ## incorrectly thinks we read/write from same file
 
-TESTDIR=$(mktemp -d /tmp/buttond.XXXXXX)
-trap "rm -rf '$TESTDIR'" EXIT
-
-for d in . ..; do
-	[ -e "$BUTTOND" ] || BUTTOND=$(realpath "$d/buttond")
-	[ -e "$GEN_EVENTS" ] || GEN_EVENTS=$(realpath "$d/gen_events.py")
-done
-cd "$TESTDIR" || exit 1
-declare -A PROCESSES=( )
-declare -A CHECKS=( )
-FAIL=0
-
 error() {
 	printf "%s\n" "$@" >&2
 	exit 1
 }
+
+TESTDIR=$(mktemp -d /tmp/buttond.XXXXXX) || error "Could not create temporary directory"
+trap "rm -rf '$TESTDIR'" EXIT
+
+for d in . ..; do
+	[ -e "$BUTTOND" ] || BUTTOND="$d/buttond"
+	[ -e "$GEN_EVENTS" ] || GEN_EVENTS="$d/gen_events.py"
+done
+[ -f "$BUTTOND" ] && [ -x "$BUTTOND" ] || error "buttond binary not found, please set BUTTOND manually"
+BUTTOND="$(realpath "$BUTTOND")"
+[ -f "$GEN_EVENTS" ] && [ -x "$GEN_EVENTS" ] || error "buttond binary not found, please set GEN_EVENTS manually"
+GEN_EVENTS="$(realpath "$GEN_EVENTS")"
+cd "$TESTDIR" || exit 1
+declare -A PROCESSES=( )
+declare -A CHECKS=( )
+FAIL=0
 
 run_pattern() {
 	local testname="$1"
