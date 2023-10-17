@@ -170,7 +170,7 @@ check_all() {
 			tmp="${tmp%% *}"
 			[[ "$tmp" = "$check" ]] || fail "Expected $check lines, got $tmp"
 			;;
-		esac 
+		esac
 	done
 }
 
@@ -187,6 +187,11 @@ run_pattern short_twohits 148,1,100 148,0,100 148,1,100 148,0,0 -- \
 	-s 148 -a "echo short" \
 	--debounce-time 0 > short_twohits
 add_check short_twohits l2-short_twohits
+
+run_pattern exit_timeout 148,1,2000 148,0,3000 -- \
+	--exit-timeout 3000 -l 148 -t 2000 \
+	-a "touch long_too_late"
+add_check exit_timeout ne-long_too_late
 
 run_pattern short_exit_after 148,1,100 148,0,100 148,1,100 148,0,0 -- \
 	-s 148 --exit-after -a "echo short" \
@@ -234,7 +239,7 @@ add_check shortshortlong_1 e-shortshortlong_1_short ne-shortshortlong_1_short2 n
 run_pattern shortshortlong_2 148,1,1200 148,0,100 -- \
 	-s 148 -a "touch shortshortlong_2_short" \
 	-s 148 -t 2000 -a "touch shortshortlong_2_short2" \
-	-l 148 -t 2000 -a "touch shortshortlong_2_long"
+	-l 148 -t 5000 -a "touch shortshortlong_2_long"
 add_check shortshortlong_2 ne-shortshortlong_2_short e-shortshortlong_2_short2 ne-shortshortlong_2_long
 
 run_pattern shortshortlong_3 148,1,2200 148,0,100 -- \
@@ -255,8 +260,8 @@ run_pattern shortlonglong_2 148,1,1200 148,0,100 -- \
 	-l 148 -t 1000 -a "touch shortlonglong_2_long"
 add_check shortlonglong_2 ne-shortlonglong_2_short e-shortlonglong_2_long ne-shortlonglong_2_long2
 
-run_pattern shortlonglong_3 148,1,2200 -- \
-	-l 148 -t 2000 -a "touch shortlonglong_3_long2" \
+run_pattern shortlonglong_3 148,1,5200 -- \
+	-l 148 -t 5000 -a "touch shortlonglong_3_long2" \
 	-s 148 -a "touch shortlonglong_3_short" \
 	-l 148 -t 1000 -a "touch shortlonglong_3_long"
 add_check shortlonglong_3 ne-shortlonglong_3_short ne-shortlonglong_3_long e-shortlonglong_3_long2
