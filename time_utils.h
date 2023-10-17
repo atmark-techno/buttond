@@ -27,6 +27,9 @@ static inline long int time_diff_tv(struct timeval *tv1, struct timeval *tv2) {
 
 /* add number of msec to given timespec */
 static inline void time_add_ts(struct timespec *ts, int msec) {
+	// avoid overflow on 32 bit platforms (tv_nsec = signed int)
+	ts->tv_sec += msec / 1000;
+	msec %= 1000;
 	ts->tv_nsec += msec * NSECS_IN_MSEC;
 	if (ts->tv_nsec >= NSECS_IN_SEC) {
 		ts->tv_sec += ts->tv_nsec / NSECS_IN_SEC;
