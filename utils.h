@@ -11,10 +11,10 @@
 #include <unistd.h>
 
 #define xassert(cond, fmt, args...) \
-	if (!(cond)) { \
+	do if (!(cond)) { \
 		fprintf(stderr, "ERROR: " fmt "\n", ##args); \
 		exit(EXIT_FAILURE); \
-	}
+	} while (0)
 
 static inline void *xcalloc(size_t nmemb, size_t size) {
 	void *ptr = calloc(nmemb, size);
