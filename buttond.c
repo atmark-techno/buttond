@@ -292,6 +292,9 @@ int main(int argc, char *argv[]) {
 		reopen_input(&state, i);
 	}
 
+	if (debug > 1)
+		printf("Waiting for input, press a key to display it\n");
+
 	while (1) {
 		int timeout = compute_timeout(state.keys, state.key_count);
 		int n = poll(state.pollfds, state.input_count + inotify_enabled, timeout);
