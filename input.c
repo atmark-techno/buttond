@@ -65,12 +65,21 @@ static void check_pressed_keys(struct state *state, int fd) {
 	xassert(max >= 0, "EVIOCGKEY failed: %m");
 	max = max * 8;
 
+	if (debug > 1) {
+		for (int i = 0; i < KEY_MAX; i++) {
+			if (!is_bit_set(key_states, i))
+				continue;
+			printf("key %s (%d) was up on open\n",
+				keyname_by_code(i), i);
+		}
+	}
+
 	for (int i = 0; i < state->key_count; i++) {
 		struct key *key = &state->keys[i];
 		if (key->code > max)
 			continue;
 		if (is_bit_set(key_states, key->code)) {
-			if (debug) {
+			if (debug == 1) {
 				printf("key %s (%d) was up on open\n",
 					keyname_by_code(key->code), key->code);
 			}
