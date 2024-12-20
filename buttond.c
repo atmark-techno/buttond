@@ -179,8 +179,8 @@ struct action *add_action(char option, char *key, char *exit_timeout,
 		break;
 	case 'E':
 		action->type = LONG_PRESS;
-		action->trigger_time = strtoint(exit_timeout);
 		action->exit_after = true;
+		action->trigger_time = strtoint(exit_timeout);
 		xassert(action->trigger_time,
 			"Could not parse trigger time (%s): %m",
 			exit_timeout);
@@ -252,6 +252,9 @@ int main(int argc, char *argv[]) {
 			break;
 		case OPT_DEBOUNCE_TIME:
 			state.debounce_msecs = strtoint(optarg);
+			xassert(errno == 0,
+				"Could not parse debounce time (%s): %m",
+				optarg);
 			break;
 		default:
 			help(argv[0]);
