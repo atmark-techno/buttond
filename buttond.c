@@ -59,6 +59,10 @@ static void help(char *argv0) {
 	printf("  -l/--long <key> [-t/--time <time ms>] [--exit-after] -a/--action <command>:\n");
 	printf("             action on long key press\n");
 	printf("  -E/--exit-timeout <time ms>: exit after <time> milliseconds\n");
+	printf("  --debounce-time <time ms>: duration to wait after keyup to merge any new keydown.\n");
+	printf("             In particular, some keyboards have a hardware repeat built-in so quick\n");
+	printf("             repetitions (default <%dms) are handled as if key was pressed continuosuly.\n",
+	       DEFAULT_DEBOUNCE_MSECS);
 	printf("  -h, --help: show this help\n");
 	printf("  -V, --version: show version\n");
 	printf("  -v, --verbose: verbose (repeatable)\n\n");
@@ -71,12 +75,8 @@ static void help(char *argv0) {
 	printf("the button was released before <time> (default %d) milliseconds.\n",
 	       DEFAULT_SHORT_PRESS_MSECS);
 	printf("a long press action happens even if key is still pressed, if it has been\n");
-	printf("held for at least <time> (default %d) milliseconds.\n\n",
+	printf("held for at least <time> (default %d) milliseconds.\n",
 	       DEFAULT_LONG_PRESS_MSECS);
-
-	printf("Note some keyboards have repeat built in firmware so quick repetitions\n");
-	printf("(<%dms) are handled as if key were pressed continuously\n",
-	       DEFAULT_DEBOUNCE_MSECS);
 }
 
 static int sort_actions_compare(const void *v1, const void *v2) {
