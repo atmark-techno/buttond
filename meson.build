@@ -13,6 +13,13 @@ project(
   ],
 )
 
+keynames_h = custom_target(
+  'keynames.h',
+  output: 'keynames.h',
+  command: [ 'gen_keynames_h.sh' ],
+  capture: true,
+)
+
 cc = meson.get_compiler('c')
 add_project_arguments(cc.get_supported_arguments([
   '-D_GNU_SOURCE',
@@ -21,8 +28,8 @@ add_project_arguments(cc.get_supported_arguments([
 
 executable(
   'buttond',
-  'buttond.c', 'input.c', 'keys.c',
-  install: true
+  sources: ['buttond.c', 'input.c', 'keys.c', keynames_h],
+  install: true,
 )
 
 install_data(
