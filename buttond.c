@@ -20,8 +20,7 @@
  */
 int debug = 0;
 int test_mode = 0;
-#define DEFAULT_LONG_PRESS_MSECS 5000
-#define DEFAULT_SHORT_PRESS_MSECS 1000
+#define DEFAULT_PRESS_MSECS 1000
 #define DEFAULT_DEBOUNCE_MSECS 10
 
 #define OPT_TEST 257
@@ -73,10 +72,10 @@ static void help(char *argv0) {
 
 	printf("Semantics: a short press action happens on release, if and only if\n");
 	printf("the button was released before <time> (default %d) milliseconds.\n",
-	       DEFAULT_SHORT_PRESS_MSECS);
+	       DEFAULT_PRESS_MSECS);
 	printf("a long press action happens even if key is still pressed, if it has been\n");
 	printf("held for at least <time> (default %d) milliseconds.\n",
-	       DEFAULT_LONG_PRESS_MSECS);
+	       DEFAULT_PRESS_MSECS);
 }
 
 static int sort_actions_compare(const void *v1, const void *v2) {
@@ -169,7 +168,7 @@ struct action *add_action(char option, char *key, char *exit_timeout,
 	struct action *action = &cur_key->actions[cur_key->action_count];
 	cur_key->action_count++;
 	memset(action, 0, sizeof(*action));
-	action->trigger_time = DEFAULT_SHORT_PRESS_MSECS;
+	action->trigger_time = DEFAULT_PRESS_MSECS;
 	switch (option) {
 	case 's':
 		action->type = SHORT_PRESS;
