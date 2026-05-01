@@ -8,9 +8,10 @@ error() {
 }
 
 TESTDIR=$(mktemp -d /tmp/buttond.XXXXXX) || error "Could not create temporary directory"
+# shellcheck disable=SC2064 ## expand TESTDIR now..
 trap "rm -rf '$TESTDIR'" EXIT
 
-for d in . ..; do
+for d in build . ..; do
 	[ -e "$BUTTOND" ] || BUTTOND="$d/buttond"
 	[ -e "$GEN_EVENTS" ] || GEN_EVENTS="$d/gen_events.py"
 done
@@ -192,13 +193,8 @@ run_pattern short_twohits 148,1,100 148,0,100 148,1,100 148,0,0 -- \
 	--debounce-time 0 > short_twohits
 add_check short_twohits l2-short_twohits
 
-run_pattern exit_timeout 148,1,2000 148,0,3000 -- \
-	--exit-timeout 3000 -l 148 -t 2000 \
-	-a "touch long_too_late"
-add_check exit_timeout ne-long_too_late
-
 run_pattern short_exit_after 148,1,100 148,0,100 148,1,100 148,0,0 -- \
-	-s 148 --exit-after -a "echo short" \
+	-s 148 --exit-after -a "echo short" --exit-timeout 3000 \
 	--debounce-time 0 > short_exit_after
 add_check short_exit_after l1-short_exit_after
 
@@ -211,12 +207,12 @@ run_pattern longkey 148,1,2200 -- \
 	-l 148 -t 2000 -a "touch longkey"
 add_check longkey e-longkey
 
+# note: gen_events.py waits 1s before sending key
 run_pattern longkey_tooslow 148,1,2200 -- \
-	-E 1000 \
-	-l 148 -t 2000 -a "touch longkey"
+	-l 148 -E 2000 -t 2000 -a "touch longkey"
 add_check longkey_tooslow ne-longkey_tooslow
 
-run_pattern longkey_norun 148,1,100 148,0,2000 -- \
+run_pattern longkey_norun 148,1,100 148,0,2200 -- \
 	-l 148 -t 2000 -a "touch longkey_norun"
 add_check longkey_norun ne-longkey_norun
 

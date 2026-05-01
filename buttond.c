@@ -233,8 +233,6 @@ int main(int argc, char *argv[]) {
 			cur_action->exit_after = true;
 			break;
 		case 'E':
-			xassert(!cur_action || cur_action->action != NULL,
-				"Cannot set stop timeout in the middle of defining a key");
 			/* add fake key with code 0 */
 			add_action('E', NULL, optarg, &state);
 			break;
