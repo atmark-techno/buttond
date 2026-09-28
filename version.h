@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
 
 #ifndef BUTTOND_VERSION
-#define BUTTOND_VERSION "1.7"
+#define BUTTOND_VERSION "1.8"
 #endif
